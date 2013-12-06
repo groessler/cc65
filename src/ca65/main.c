@@ -1,3 +1,4 @@
+/*****************************************************************************/
 /*                                                                           */
 /*                                  main.c                                   */
 /*                                                                           */
@@ -246,6 +247,10 @@ static void SetSys (const char* Sys)
             CBMSystem ("__PET__");
             break;
 
+        case TGT_BBC:
+            NewSymbol ("__BBC__", 1);
+            break;
+
         case TGT_APPLE2:
             NewSymbol ("__APPLE2__", 1);
             break;
@@ -255,16 +260,10 @@ static void SetSys (const char* Sys)
             NewSymbol ("__APPLE2ENH__", 1);
             break;
 
-        case TGT_ATMOS:
-            NewSymbol ("__ATMOS__", 1);
-            break;
-
-        case TGT_BBC:
-            NewSymbol ("__BBC__", 1);
-            break;
-
-        case TGT_CREATIVISION:
-            NewSymbol ("__CREATIVISION__", 1);
+        case TGT_GEOS_CBM:
+            /* Do not handle as a CBM system */
+            NewSymbol ("__GEOS__", 1);
+            NewSymbol ("__GEOS_CBM__", 1);
             break;
 
         case TGT_GEOS_APPLE:
@@ -272,22 +271,24 @@ static void SetSys (const char* Sys)
             NewSymbol ("__GEOS_APPLE__", 1);
             break;
 
-        case TGT_GEOS_CBM:
-            /* Do not handle as a CBM system */
-            NewSymbol ("__GEOS__", 1);
-            NewSymbol ("__GEOS_CBM__", 1);
-            break;
-
         case TGT_LUNIX:
             NewSymbol ("__LUNIX__", 1);
             break;
 
-        case TGT_LYNX:
-            NewSymbol ("__LYNX__", 1);
+        case TGT_ATMOS:
+            NewSymbol ("__ATMOS__", 1);
             break;
 
         case TGT_NES:
             NewSymbol ("__NES__", 1);
+            break;
+
+        case TGT_SUPERVISION:
+            NewSymbol ("__SUPERVISION__", 1);
+            break;
+
+        case TGT_LYNX:
+            NewSymbol ("__LYNX__", 1);
             break;
 
         case TGT_SIM6502:
@@ -296,10 +297,6 @@ static void SetSys (const char* Sys)
 
         case TGT_SIM65C02:
             NewSymbol ("__SIM65C02__", 1);
-            break;
-
-        case TGT_SUPERVISION:
-            NewSymbol ("__SUPERVISION__", 1);
             break;
 
         default:
@@ -650,15 +647,18 @@ static void OneLine (void)
      * an instruction.
      */
     if (CurTok.Tok == TOK_IDENT) {
-        if (!UbiquitousIdents) {
-            /* Macros and symbols cannot use instruction names */
+        if (UbiquitousIdents) {
+            /* Macros CAN be instructions, so check for them first */
+            Mac = FindMacro (&CurTok.SVal);
+            if (Mac == 0) {
+                Instr = FindInstruction (&CurTok.SVal);
+            }
+        } else {
+            /* Macros and symbols may NOT use the names of instructions */
             Instr = FindInstruction (&CurTok.SVal);
             if (Instr < 0) {
                 Mac = FindMacro (&CurTok.SVal);
             }
-        } else {
-            /* Macros and symbols may use the names of instructions */
-            Mac = FindMacro (&CurTok.SVal);
         }
     }
 
@@ -745,15 +745,18 @@ static void OneLine (void)
              * be a macro or instruction.
              */
             if (CurTok.Tok == TOK_IDENT) {
-                if (!UbiquitousIdents) {
-                    /* Macros and symbols cannot use instruction names */
+                if (UbiquitousIdents) {
+                    /* Macros CAN be instructions, so check for them first */
+                    Mac = FindMacro (&CurTok.SVal);
+                    if (Mac == 0) {
+                        Instr = FindInstruction (&CurTok.SVal);
+                    }
+                } else {
+                    /* Macros and symbols may NOT use the names of instructions */
                     Instr = FindInstruction (&CurTok.SVal);
                     if (Instr < 0) {
                         Mac = FindMacro (&CurTok.SVal);
                     }
-                } else {
-                    /* Macros and symbols may use the names of instructions */
-                    Mac = FindMacro (&CurTok.SVal);
                 }
             }
         }
@@ -766,8 +769,7 @@ static void OneLine (void)
     } else if (Mac != 0) {
         /* A macro expansion */
         MacExpandStart (Mac);
-    } else if (Instr >= 0 ||
-               (UbiquitousIdents && ((Instr = FindInstruction (&CurTok.SVal)) >= 0))) {
+    } else if (Instr >= 0) {
         /* A mnemonic - assemble one instruction */
         HandleInstruction (Instr);
     } else if (PCAssignment && (CurTok.Tok == TOK_STAR || CurTok.Tok == TOK_PC)) {
