@@ -226,12 +226,14 @@ MOVE:   php
         sei                             ; No interrupts
 
         pha
+        lda     visible
+        beq     @nohide
         txa
         pha
         jsr     CHIDE
         pla
         tax
-        pla
+@nohide:pla
 
         sta     YPos
         stx     YPos+1                  ; New Y position
@@ -340,11 +342,13 @@ IRQ:
         clc
         beq     hlprts                  ; no movement, do nothing
 
+        lda     visible
+        beq     @nohide
         jsr     CHIDE
 
 ; Check left/right
 
-        lda     Temp                    ; Read joystick #0
+@nohide:lda     Temp                    ; Read joystick #0
         and     #(JOY::LEFT | JOY::RIGHT)
         beq     @SkipX                  ;
 
