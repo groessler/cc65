@@ -6,7 +6,7 @@
 /*                                                                           */
 /*                                                                           */
 /*                                                                           */
-/* (C) 2000-2006 Mark Keates <markk@dendrite.co.uk>                          */
+/* (C) 2000-2014 Mark Keates <markk@dendrite.co.uk>                          */
 /*               Freddy Offenga <taf_offenga@yahoo.com>                      */
 /*               Christian Groessler <chris@groessler.org>                   */
 /*                                                                           */
@@ -310,6 +310,57 @@ struct __iocb {
 #define IOCB_CHDIR_SPDOS 0x2C  /* change directory (SpartaDOS) */
 #define IOCB_GETCWD      0x30  /* get current directory (MyDOS/SpartaDOS) */
 #define IOCB_FORMAT      0xFE  /* format */
+
+/* addresses of static drivers of the runtime */
+#ifndef __ATARIXL__
+extern unsigned char atr130_emd[];
+extern unsigned char atrmj8_joy[];
+extern unsigned char atrjoy_mou[];
+extern unsigned char atrst_mou[];
+extern unsigned char atrami_mou[];
+extern unsigned char atrtrk_mou[];
+extern unsigned char atrtt_mou[];
+extern unsigned char atrrdev_ser[];
+extern unsigned char atr3_tgi[];
+extern unsigned char atr4_tgi[];
+extern unsigned char atr5_tgi[];
+extern unsigned char atr6_tgi[];
+extern unsigned char atr7_tgi[];
+extern unsigned char atr8_tgi[];
+extern unsigned char atr8p2_tgi[];
+extern unsigned char atr9_tgi[];
+extern unsigned char atr9p2_tgi[];
+extern unsigned char atr10_tgi[];
+extern unsigned char atr10p2_tgi[];
+extern unsigned char atr11_tgi[];
+extern unsigned char atr14_tgi[];
+extern unsigned char atr15_tgi[];
+extern unsigned char atr15p2_tgi[];
+#else
+extern unsigned char atrx130_emd[];
+extern unsigned char atrxmj8_joy[];
+extern unsigned char atrxjoy_mou[];
+extern unsigned char atrxst_mou[];
+extern unsigned char atrxami_mou[];
+extern unsigned char atrxtrk_mou[];
+extern unsigned char atrxtt_mou[];
+extern unsigned char atrxrdev_ser[];
+extern unsigned char atrx3_tgi[];
+extern unsigned char atrx4_tgi[];
+extern unsigned char atrx5_tgi[];
+extern unsigned char atrx6_tgi[];
+extern unsigned char atrx7_tgi[];
+extern unsigned char atrx8_tgi[];
+extern unsigned char atrx8p2_tgi[];
+extern unsigned char atrx9_tgi[];
+extern unsigned char atrx9p2_tgi[];
+extern unsigned char atrx10_tgi[];
+extern unsigned char atrx10p2_tgi[];
+extern unsigned char atrx11_tgi[];
+extern unsigned char atrx14_tgi[];
+extern unsigned char atrx15_tgi[];
+extern unsigned char atrx15p2_tgi[];
+#endif
 
 /* End of atari.h */
 #endif /* #ifndef _ATARI_H */
