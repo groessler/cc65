@@ -1,9 +1,10 @@
 language:
   - c
 install:
-  - sudo apt-get install linuxdoc-tools
+  - sudo apt-get install linuxdoc-tools linuxdoc-tools-info
 script:
-  - make
+  - make all doc
+after_success:
   - make -C doc gh-pages
 env:
   global:
