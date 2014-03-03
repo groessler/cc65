@@ -221,6 +221,16 @@ that the cartridge doesn't prevent the booting of DOS.
 The option byte will be located at address &dollar;BFFD. For more information
 about its use, see e.g. "Mapping the Atari".
 
+<sect2><tt/atari-cassette.cfg/<p>
+
+This config file can be used to create cassette boot files. It's suited both
+for C and assembly language programs.
+
+The size of a cassette boot file is restricted to 32K. Larger programs
+would need to be split in more parts and the parts to be loaded manually.
+
+To write the generated file to a cassette, a utility to run
+on an Atari is provided in the <tt/targetutil/ directory (<tt/w2cas.com/).
 
 <sect1><tt/atarixl/ config files<p>
 
@@ -462,7 +472,7 @@ interface module.
 
 <sect>Limitations<p>
 
-<sect1><tt/atarixl/<label id="limitations"<p>
+<sect1><tt/atarixl/<#if output="info|latex2e"> limitations</#if><label id="limitations"<p>
 
 <itemize>
 <item>The display is cleared at program start and at program termination.  This is a side
@@ -491,9 +501,9 @@ or f80.com software is missing. Of course you may use stdio.h functions.
 
 <sect>Technical details<label id="techdetail"><p>
 
-<sect1><tt/atari/<p>
+<sect1><tt/atari/<#if output="info|latex2e"> details</#if><p>
 
-<sect2>Load chunks<p>
+<sect2><#if output="info|latex2e"><tt/atari/ </#if>Load chunks<p>
 
 An <tt/atari/ program contains two load chunks.
 
@@ -510,7 +520,7 @@ The contents of this chunk come from the RAM memory area of the linker config fi
 </enum>
 
 
-<sect1><tt/atarixl/<p>
+<sect1><tt/atarixl/<#if output="info|latex2e"> details</#if><p>
 
 <sect2>General operation<p>
 
@@ -533,7 +543,7 @@ point symbols in <tt/atari.inc/ to point to the wrapper functions.
 For ROM functions which require input or output buffers, the wrappers
 copy the data as required to buffers in low memory.
 
-<sect2>Load chunks<label id="xlchunks"><p>
+<sect2><#if output="info|latex2e"><tt/atarixl/ </#if>Load chunks<label id="xlchunks"><p>
 
 An <tt/atarixl/ program contains three load chunks.
 
