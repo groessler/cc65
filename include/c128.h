@@ -129,7 +129,7 @@ extern unsigned char c128_reu_emd[];
 extern unsigned char c128_vdc_emd[];
 extern unsigned char c128_ptvjoy_joy[];
 extern unsigned char c128_stdjoy_joy[];  /* Referred to by joy_static_stddrv[] */
-extern unsigned char c128_1351_mous[];   /* Referred to by mouse_static_stddrv[] */
+extern unsigned char c128_1351_mou[];    /* Referred to by mouse_static_stddrv[] */
 extern unsigned char c128_joy_mou[];
 extern unsigned char c128_inkwell_mou[];
 extern unsigned char c128_pot_mou[];
