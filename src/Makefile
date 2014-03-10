@@ -14,7 +14,7 @@ PROGS = ar65  \
         sim65 \
         sp65
 
-.PHONY: all mostlyclean clean install avail unavail bin $(PROGS)
+.PHONY: all mostlyclean clean install zip avail unavail bin $(PROGS)
 
 .SUFFIXES:
 
@@ -30,8 +30,8 @@ LD65_CFG = $(datadir)/cfg
 CC = $(CROSS_COMPILE)gcc
 AR = $(CROSS_COMPILE)ar
 
-CFLAGS += -MMD -MP -O -I common $(USER_CFLAGS) \
-          -Wall -Wextra -Wno-char-subscripts \
+CFLAGS += -MMD -MP -O -I common \
+          -Wall -Wextra -Wno-char-subscripts $(USER_CFLAGS) \
           -DCA65_INC=$(CA65_INC) -DCC65_INC=$(CC65_INC) \
           -DLD65_LIB=$(LD65_LIB) -DLD65_OBJ=$(LD65_OBJ) -DLD65_CFG=$(LD65_CFG)
 
@@ -96,6 +96,9 @@ unavail:
 	$(foreach prog,$(PROGS),$(UNAVAIL_recipe))
 
 endif # CMD_EXE
+
+zip:
+	@cd .. && zip cc65 bin/*
 
 define OBJS_template
 
