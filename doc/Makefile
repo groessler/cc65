@@ -1,8 +1,21 @@
-.PHONY: all doc html info gh-pages mostlyclean clean install
+ifneq ($(shell echo),)
+  CMD_EXE = 1
+endif
+
+.PHONY: all mostlyclean clean install zip doc html info gh-pages
 
 .SUFFIXES:
 
-ifeq ($(shell echo),)
+htmldir = $(prefix)/share/doc/cc65$(DESTPACKAGE_SUFFIX)/html
+infodir = $(prefix)/share/info
+
+all mostlyclean:
+
+ifdef CMD_EXE
+
+clean install zip doc:
+
+else # CMD_EXE
 
 SGMLS := $(wildcard *.sgml)
 
@@ -11,20 +24,30 @@ TOC_LEVEL = 0
 
 TOC_LEVEL = 2
 
-GH_PAGES = ../../gh-pages
+INSTALL = install
 
-all:
+clean:
+	$(RM) -r ../html ../info
+
+install:
+	$(if $(prefix),,$(error variable `prefix' must be set))
+ifeq ($(wildcard ../html),../html)
+	$(INSTALL) -d $(DESTDIR)$(htmldir)
+	$(INSTALL) -m644 ../html/*.* $(DESTDIR)$(htmldir)
+endif
+ifeq ($(wildcard ../info),../info)
+	$(INSTALL) -d $(DESTDIR)$(infodir)
+	$(INSTALL) -m644 ../info/*.* $(DESTDIR)$(infodir)
+endif
+
+zip:
+	@cd .. && zip cc65 html/*.*
 
 doc: html info
 
 html: $(addprefix ../html/,$(SGMLS:.sgml=.html) doc.css doc.png)
 
 info: $(addprefix ../info/,$(SGMLS:.sgml=.info))
-
-mostlyclean:
-
-clean:
-	$(RM) -r ../html ../info
 
 ../html ../info:
 	@mkdir $@
@@ -38,22 +61,4 @@ clean:
 ../info/%.info: %.sgml | ../info
 	@cd ../info && linuxdoc -B info ../doc/$<
 
-gh-pages: html
-ifdef GH_TOKEN
-	git clone --branch=gh-pages https://$(GH_TOKEN)@github.com/oliverschmidt/cc65.git $(GH_PAGES)
-	git --work-tree=$(GH_PAGES) --git-dir=$(GH_PAGES)/.git config user.name "Oliver Schmidt"
-	git --work-tree=$(GH_PAGES) --git-dir=$(GH_PAGES)/.git config user.email "ol.sc@web.de"
-	git --work-tree=$(GH_PAGES) --git-dir=$(GH_PAGES)/.git config push.default simple
-	$(RM) -r $(GH_PAGES)/doc
-	mkdir $(GH_PAGES)/doc
-	cp ../html/* $(GH_PAGES)/doc
-	git --work-tree=$(GH_PAGES) --git-dir=$(GH_PAGES)/.git add -A doc
-	-git --work-tree=$(GH_PAGES) --git-dir=$(GH_PAGES)/.git commit -m "Updated doc from commit $(TRAVIS_COMMIT)."
-	git --work-tree=$(GH_PAGES) --git-dir=$(GH_PAGES)/.git push
-endif
-
-else # cmd.exe
-
-all doc mostlyclean clean install:
-
-endif # cmd.exe
+endif # CMD_EXE

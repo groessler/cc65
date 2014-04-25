@@ -111,11 +111,17 @@ void CreateMapFile (int ShortMap)
     /* The remainder is not written for short map files */
     if (!ShortMap) {
 
-        /* Write the exports list */
+        /* Write the exports list by name */
         fprintf (F, "\n\n"
-                    "Exports list:\n"
-                    "-------------\n");
-        PrintExportMap (F);
+                    "Exports list by name:\n"
+                    "---------------------\n");
+        PrintExportMapByName (F);
+
+        /* Write the exports list by value */
+        fprintf (F, "\n\n"
+                    "Exports list by value:\n"
+                    "----------------------\n");
+        PrintExportMapByValue (F);
 
         /* Write the imports list */
         fprintf (F, "\n\n"
@@ -152,6 +158,3 @@ void CreateLabelFile (void)
         Error ("Error closing label file `%s': %s", LabelFileName, strerror (errno));
     }
 }
-
-
-

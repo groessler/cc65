@@ -4,8 +4,9 @@
 <!-- Title information -->
 
 <title>grc65 -- GEOS Resource Compiler
-<author><url name="Maciej 'YTM/Elysium' Witkowiak" url="mailto:ytm@elysium.pl">
-<and><url name="Greg King" url="mailto:gngking@erols.com">
+<author>
+<url url="mailto:ytm@elysium.pl" name="Maciej 'YTM/Elysium' Witkowiak">,<newline>
+<url url="mailto:greg.king5@verizon.net" name="Greg King">
 <date>VII 2000; VI,VII 2002; 2005-8-3
 <abstract>
 This document describes a compiler that can create GEOS headers and menues for
@@ -178,7 +179,7 @@ GEOS support in cc65 is based on the <em/Convert v2.5/ format, well-known in
 the GEOS world.  It means that each file built with the cc65 package has to be
 deconverted in GEOS, before it can be run.  You can read a step-by-step
 description of that in the <url name="GEOS section of the cc65 Compiler Intro"
-url="intro-6.html#ss6.5">.
+url="intro.html#ss6.5">.
 
 Each project consists of four parts, two are provided by cc65.  Those parts
 are:<enum>
