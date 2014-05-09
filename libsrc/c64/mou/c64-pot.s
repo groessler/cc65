@@ -3,7 +3,7 @@
 ;
 ; 2006-08-20, Stefan Haubenthal
 ; 2009-09-26, Ullrich von Bassewitz
-; 2014-03-17, Greg King
+; 2014-05-05, Greg King
 ;
 
         .include        "zeropage.inc"
@@ -15,7 +15,7 @@
 ; ------------------------------------------------------------------------
 ; Header. Includes jump table
 
-.segment        "JUMPTABLE"
+.segment        "HEADER"
 
 HEADER:
 
@@ -42,6 +42,10 @@ HEADER:
         .addr   INFO
         .addr   IOCTL
         .addr   IRQ
+
+; Mouse driver flags
+
+        .byte   MOUSE_FLAG_LATE_IRQ
 
 ; Callback table, set by the kernel before INSTALL is called
 
