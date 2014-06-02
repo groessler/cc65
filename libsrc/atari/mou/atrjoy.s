@@ -88,6 +88,11 @@ Buttons:        .res    1               ; Button mask
 
 Temp:           .res    1               ; Temporary value used in the int handler
 
+.data
+
+ivec:	.byte $4c
+	.addr icont
+
 ; Default values for above variables
 
 .rodata
@@ -318,6 +323,9 @@ IRQ:
 
 ; Check for a pressed button and place the result into Buttons
 
+brk
+	jmp	ivec
+icont:
         ldx     #0
         lda     TRIG0                   ; joystick #0 trigger
         bne     @L0                     ; not pressed

@@ -233,7 +233,7 @@ $(TARGET): $$($1_DRVS)
 
 $$($1_STCPAT): $$($1_DRVPAT)
 	@echo $$(TARGET) - $$(<F)
-	@$$(CO65) -o $$(@:.o=.s) --code-label _$$(subst -,_,$$(subst .,_,$$(<F))) $$<
+	@$$(CO65) -o $$(@:.o=.s) --data-label _$$(subst -,_,$$(subst .,_,$$(<F))) $$<
 	@$$(CA65) -t $$(TARGET) -o $$@ $$(@:.o=.s)
 
 OBJS += $$($1_STCS)

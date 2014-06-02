@@ -30,6 +30,10 @@
 ;*    distribution.                                                          */
 ;*                                                                           */
 ;*****************************************************************************/
+;*                                                                           */
+;* Changes to support non-simple .o65 files by Christian Groessler, 2014     */
+;*                                                                           */
+;*****************************************************************************/
 
 
 
@@ -79,9 +83,9 @@ ExpectedHdr:
         .byte   O65_MARKER_0, O65_MARKER_1              ; non C64 marker
         .byte   O65_MAGIC_0, O65_MAGIC_1, O65_MAGIC_2   ; Magic ("o65")
         .byte   O65_VERSION                             ; Version
-        .word   O65_MODE_CC65                           ; Mode word
-
 ExpectedHdrSize = * - ExpectedHdr
+;        .word   O65_MODE_CC65                           ; Mode word
+
 
 
 ;------------------------------------------------------------------------------
@@ -362,6 +366,14 @@ ValidateHeader:
         dey
         bpl     ValidateHeader
 
+        lda     Header + O65_HDR::MODE
+        cmp     #<O65_MODE_CC65
+        bne     HeaderError
+        lda     Header + O65_HDR::MODE + 1
+        ora     #>O65_ADDR_SIMPLE
+        cmp     #>O65_MODE_CC65
+        bne     HeaderError
+
 ; Header is ok as far as we can say now. Read all options, check for the
 ; OS option and ignore all others. The OS option contains a version number
 ; and the module id as additional data.
@@ -424,7 +436,8 @@ OSError:
 
 OptDone:
         lda     TPtr+1
-        bne     CalcSizes
+        ;bne     CalcSizes
+        bne     CheckFormat
 
 ; Entry point for header errors
 
@@ -437,13 +450,85 @@ HeaderError:
 ; total module size also into the control structure for evaluation by the
 ; caller
 
-CalcSizes:
+CheckFormat:
+
+        brk
+
+; @@@ check text or data starting at 0
+; @@@ check overlap text and data
+
+.if 0
+        lda     Header + O65_HDR::TBASE
+        ora     Header + O65_HDR::TBASE + 1
+        beq     TextAt0
+.endif
+        lda     Header + O65_HDR::DBASE
+        ora     Header + O65_HDR::DBASE + 1
+        beq     DataAt0
+ferr:   jmp     FormatError
+
+.if 0
+; Text segment is the first in memory. Check if the start of the data
+; segment starts at the next address.
+TextAt0:
+        lda     Header + O65_HDR::TLEN
+        cmp     Header + O65_HDR::DBASE
+        bne     ferr
+        lda     Header + O65_HDR::TLEN + 1
+        cmp     Header + O65_HDR::DBASE + 1
+        bne     ferr
+
+        lda     Header + O65_HDR::DBASE
+        clc
+        adc     Header + O65_HDR::DLEN
+        tax
+        lda     Header + O65_HDR::DBASE + 1
+        adc     Header + O65_HDR::DLEN + 1
+        jmp     CheckBSS
+.endif
+; Data segment is the first in memory. Check if the start of the text
+; segment starts at the next address.
+DataAt0:
+        lda     Header + O65_HDR::DLEN
+        cmp     Header + O65_HDR::TBASE
+        bne     ferr
+        lda     Header + O65_HDR::DLEN + 1
+        cmp     Header + O65_HDR::TBASE + 1
+        bne     ferr
+
+        lda     Header + O65_HDR::TBASE
+        clc
+        adc     Header + O65_HDR::TLEN
+        tax
+        lda     Header + O65_HDR::TBASE + 1
+        adc     Header + O65_HDR::TLEN + 1
+        ;jmp    CheckBSS
+
+; @@@ check .bss at end of text,data
+
+; The first two segments (in memory) are text and data. Check if bss
+; follows immediately.
+; A/X contains the combined size of text and data segments. X - low byte,
+; A - high byte
+
+CheckBSS:
+        cpx     Header + O65_HDR::BBASE
+        bne     ferr
+        cmp     Header + O65_HDR::BBASE + 1
+        bne     ferr
+
+        stx     TPtr
+        sta     TPtr + 1
+
+;CalcSizes:
+.if 0
         lda     Header + O65_HDR::TLEN
         add     Header + O65_HDR::DLEN
         sta     TPtr
         lda     Header + O65_HDR::TLEN + 1
         adc     Header + O65_HDR::DLEN + 1
         sta     TPtr+1
+.endif
         lda     TPtr
         add     Header + O65_HDR::BLEN
         pha                             ; Save low byte of total size
@@ -496,6 +581,7 @@ GotMem: lda     Module
 ; code+data segment is still in TPtr.
 ; C->read (C->callerdata, C->module, H.tlen + H.dlen)
 
+.if 0
         jsr     PushCallerData
         lda     Module
         ldx     Module+1
@@ -503,6 +589,37 @@ GotMem: lda     Module
         lda     TPtr
         ldx     TPtr+1
         jsr     ReadAndCheckError       ; Bails out in case of errors
+.else
+
+; Load code (first chunk in .o65 file) to its destination.
+        jsr     PushCallerData
+        lda     Module
+        add     Header + O65_HDR::TBASE
+        pha
+        lda     Module + 1
+        adc     Header + O65_HDR::TBASE + 1
+        tax
+        pla
+        jsr     pushax
+        lda     Header + O65_HDR::TLEN
+        ldx     Header + O65_HDR::TLEN + 1
+        jsr     ReadAndCheckError       ; Bails out in case of errors
+
+; Load data (second chunk in .o65 file) to its destination.
+        jsr     PushCallerData
+        lda     Module
+        add     Header + O65_HDR::DBASE
+        pha
+        lda     Module + 1
+        adc     Header + O65_HDR::DBASE + 1
+        tax
+        pla
+        jsr     pushax
+        lda     Header + O65_HDR::DLEN
+        ldx     Header + O65_HDR::DLEN + 1
+        jsr     ReadAndCheckError       ; Bails out in case of errors
+
+.endif
 
 ; We've got the code and data segments in memory. Next section contains
 ; undefined references which we don't support. So check if the count of
@@ -517,12 +634,25 @@ Undef:  jmp     FormatError
 ; Number of undefined references was zero. Next come the relocation tables
 ; for code and data segment. Relocate the code segment
 
-Reloc:  lda     Module
+Reloc:
+.if 0
+        lda     Module
         ldx     Module + 1              ; Code segment address
         jsr     RelocSeg
+.else
+        lda     Module
+        add     Header + O65_HDR::TBASE
+        pha
+        lda     Module + 1
+        adc     Header + O65_HDR::TBASE + 1
+        tax
+        pla
+        jsr     RelocSeg        
+.endif
 
 ; Relocate the data segment
 
+.if 0
         lda     Module
         add     Header + O65_HDR::TLEN
         pha
@@ -531,6 +661,17 @@ Reloc:  lda     Module
         tax
         pla                             ; Data segment address in a/x
         jsr     RelocSeg
+.else
+        lda     Module
+        add     Header + O65_HDR::DBASE
+        pha
+        lda     Module + 1
+        adc     Header + O65_HDR::DBASE + 1
+        tax
+        pla
+        jsr     RelocSeg        
+.endif
+
 
 ; We're done. Restore the register bank and return a success code
 
