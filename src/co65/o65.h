@@ -164,6 +164,7 @@ struct O65Data {
                                  O65_RELOC_BYTE  |      \
                                  O65_SIZE_16BIT  |      \
                                  O65_FTYPE_EXE   |      \
+                                 O65_ADDR_SIMPLE |      \
                                  O65_ALIGN_1)
 
 /* The four o65 segment types. */
