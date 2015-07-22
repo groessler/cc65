@@ -8,7 +8,7 @@ endif
 ifdef CMD_EXE
   S := $(subst /,\,/)
   NOT := - # Hack
-  DEL = del /f $(subst /,\,$1)
+  DEL = -del /f $(subst /,\,$1)
 else
   S := /
   NOT := !
@@ -52,8 +52,12 @@ $(WORKDIR)/sitest%prg: sitest.c
 	@echo "FIXME: " $@ "currently will fail."
 	-$(CL65) $(subst .,,$(*:.o%=-O%)) $(CC65FLAGS) $< -o $@
 #	-$(SIM65) $(SIM65FLAGS) $@
+$(WORKDIR)/cc65141011%prg: cc65141011.c
+	@echo "FIXME: " $@ "currently can fail."
+	$(CL65) $(subst .,,$(*:.o%=-O%)) $(CC65FLAGS) $< -o $@
+	-$(SIM65) $(SIM65FLAGS) $@
 
 clean:
-	-@$(call DEL,$(TESTS))
-	-@$(call DEL,$(SOURCES:.c=.o))
-	-@$(call DEL,$(SOURCES:%.c=$(WORKDIR)/%.out))
+	@$(call DEL,$(TESTS))
+	@$(call DEL,$(SOURCES:.c=.o))
+	@$(call DEL,$(SOURCES:%.c=$(WORKDIR)/%.out))

@@ -8,7 +8,7 @@ endif
 
 ifdef CMD_EXE
   S := $(subst /,\,/)
-  DEL = del /f $(subst /,\,$1)
+  DEL = -del /f $(subst /,\,$1)
 else
   S := /
   DEL = $(RM) $1
@@ -45,12 +45,8 @@ $(WORKDIR)/%.ref: %.c
 #
 $(WORKDIR)/init%prg: CC65FLAGS += -Wc --all-cdecl
 $(WORKDIR)/switch.%rg: CC65FLAGS += -Wc --all-cdecl
-
-# Also, yacc.c does some things that fail when stack operations are optimized.
-# Therefore, don't optimize them.
-#
-$(WORKDIR)/yacc.%rg: CC65FLAGS += -Wc --all-cdecl,--disable-opt,OptStackOps
-$(WORKDIR)/yaccdbg%prg: CC65FLAGS += -Wc --all-cdecl,--disable-opt,OptStackOps
+$(WORKDIR)/yacc.%rg: CC65FLAGS += -Wc --all-cdecl
+$(WORKDIR)/yaccdbg%prg: CC65FLAGS += -Wc --all-cdecl
 
 $(WORKDIR)/%.prg: %.c $(WORKDIR)/%.ref
 	$(CL65) $(CC65FLAGS) $< -o $@
@@ -93,8 +89,8 @@ $(WORKDIR)/%.or.prg: %.c $(WORKDIR)/%.ref
 	$(DIFF) $(WORKDIR)/$*.out $(WORKDIR)/$*.ref
 
 clean:
-	-@$(call DEL,$(TESTS))
-	-@$(call DEL,$(SOURCES:.c=.o))
-	-@$(call DEL,$(SOURCES:%.c=$(WORKDIR)/%.out))
-	-@$(call DEL,$(SOURCES:%.c=$(WORKDIR)/%.ref))
-	-@$(call DEL,$(SOURCES:%.c=$(WORKDIR)/%.host))
+	@$(call DEL,$(TESTS))
+	@$(call DEL,$(SOURCES:.c=.o))
+	@$(call DEL,$(SOURCES:%.c=$(WORKDIR)/%.out))
+	@$(call DEL,$(SOURCES:%.c=$(WORKDIR)/%.ref))
+	@$(call DEL,$(SOURCES:%.c=$(WORKDIR)/%.host))
