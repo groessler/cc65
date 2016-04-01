@@ -15,7 +15,8 @@
 
 
 ;--------------------------------------------------------------------------
-; Put this constructor into a segment that can be re-used by programs.
+; Put this constructor into a segment whose space
+; will be re-used by BSS, the heap, and the C stack.
 ;
 .segment        "ONCE"
 
@@ -43,7 +44,7 @@ restore_caps:
 
 ;--------------------------------------------------------------------------
 
-.bss
+.segment        "INIT"
 
 capsave:
         .res    1
