@@ -1,16 +1,12 @@
 /*****************************************************************************/
 /*                                                                           */
-/*                                  model.c                                  */
+/*                                  lz4.h                                    */
 /*                                                                           */
-/*         o65 model definitions for the co65 object file converter          */
+/*              Decompression routine for the 'lz4' format                   */
 /*                                                                           */
 /*                                                                           */
 /*                                                                           */
-/* (C) 2003      Ullrich von Bassewitz                                       */
-/*               Roemerstrasse 52                                            */
-/*               D-70794 Filderstadt                                         */
-/* EMail:        uz@cc65.org                                                 */
-/*                                                                           */
+/* (C) 2017 Mega Cat Studios                                                 */
 /*                                                                           */
 /* This software is provided 'as-is', without any expressed or implied       */
 /* warranty.  In no event will the authors be held liable for any damages    */
@@ -33,61 +29,15 @@
 
 
 
-/* common */
-#include "strutil.h"
+#ifndef _LZ4_H
+#define _LZ4_H
 
-/* co65 */
-#include "error.h"
-#include "model.h"
-
-
-
-/*****************************************************************************/
-/*                                   Data                                    */
-/*****************************************************************************/
-
-
-
-/* Current model */
-O65Model Model = O65_MODEL_NONE;
-
-/* Name table */
-static const char* const NameTable[O65_MODEL_COUNT] = {
-    "none",    
-    "os/a65",
-    "lunix",
-    "cc65-module"
-};
-
-
-
-/*****************************************************************************/
-/*                                   Code                                    */
-/*****************************************************************************/
-
-
-
-const char* GetModelName (O65Model M)
-/* Map the model to its name. */
-{
-    if (M < 0 || M >= O65_MODEL_COUNT) {
-        Internal ("O65 Model %d not found", M);
-    }
-    return NameTable[M];
-}
-
-
-
-O65Model FindModel (const char* ModelName)
-/* Map a model name to its identifier. Return O65_MODEL_INVALID if the name
-** could not be found. Case is ignored when comparing names.
+void __fastcall__ decompress_lz4 (const unsigned char* src, unsigned char* const dst,
+                                  const unsigned short uncompressed_size);
+/* Decompresses the source buffer into the destination buffer.
+** The size of the decompressed data must be known in advance, LZ4
+** does not include any terminator in-stream.
 */
-{
-    O65Model M;
-    for (M = O65_MODEL_NONE; M < O65_MODEL_COUNT; ++M) {
-        if (StrCaseCmp (ModelName, NameTable[M]) == 0) {
-            return M;
-        }
-    }
-    return O65_MODEL_INVALID;
-}
+
+/* end of lz4.h */
+#endif
