@@ -75,10 +75,8 @@
 
 
 
-/* Expanding upon joystick.h */
-#define JOY_FIRE_IDX            4
-
-#define JOY_FIRE(v)             ((v) & joy_masks[JOY_FIRE_IDX])
+#define JOY_FIRE_MASK   JOY_BTN_1_MASK
+#define JOY_FIRE(v)     ((v) & JOY_FIRE_MASK)
 
 
 
@@ -159,6 +157,14 @@ struct cbm_dirent {
 
 unsigned char get_tv (void);
 /* Return the video mode the machine is using. */
+
+#define KBDREPEAT_CURSOR 0x00
+#define KBDREPEAT_NONE   0x40
+#define KBDREPEAT_ALL    0x80
+
+unsigned char __fastcall__ kbrepeat(unsigned char);
+unsigned char __fastcall__ kbrepeatdelay(unsigned char);
+unsigned char __fastcall__ kbrepeatrate(unsigned char);
 
 #if !defined(__CBM610__) && !defined(__PET__)
 void waitvsync (void);
