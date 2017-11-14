@@ -6,7 +6,7 @@
 /*                                                                           */
 /*                                                                           */
 /*                                                                           */
-/* (C) 2002       Debrune Jérome, <jede@oric.org>                            */
+/* (C) 2002       Debrune JÃ©rome, <jede@oric.org>                            */
 /* (C) 2003-2013  Ullrich von Bassewitz                                      */
 /*                Roemerstrasse 52                                           */
 /*                D-70794 Filderstadt                                        */
@@ -129,6 +129,7 @@
 
 /* The addresses of the static drivers */
 extern unsigned char atmos_pase_joy[];           /* Referred to by joy_static_stddrv[] */
+extern unsigned char atmos_ijk_joy[];
 extern unsigned char atmos_acia_ser[];
 extern unsigned char atmos_228_200_3_tgi[];
 extern unsigned char atmos_240_200_2_tgi[];      /* Referred to by tgi_static_stddrv[] */
