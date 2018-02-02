@@ -1,15 +1,9 @@
 /*****************************************************************************/
 /*                                                                           */
-/*                                   c16.h                                   */
+/*                                  target.h                                 */
 /*                                                                           */
-/*                      C16 system specific definitions                      */
+/*                        Target specific definitions                        */
 /*                                                                           */
-/*                                                                           */
-/*                                                                           */
-/* (C) 2002      Ullrich von Bassewitz                                       */
-/*               Wacholderweg 14                                             */
-/*               D-70597 Stuttgart                                           */
-/* EMail:        uz@musoftware.de                                            */
 /*                                                                           */
 /*                                                                           */
 /* This software is provided 'as-is', without any expressed or implied       */
@@ -33,29 +27,47 @@
 
 
 
-#ifndef _C16_H
-#define _C16_H
+#ifndef _TARGET_H
+#define _TARGET_H
 
 
 
-/* Check for errors */
-#if !defined(__C16__)
-#  error This module may only be used when compiling for the C16!
+/* Include the correct target specific file */
+#if   defined(__APPLE2ENH__)
+#  include <apple2enh.h>
+#elif defined(__APPLE2__)
+#  include <apple2.h>
+#elif defined(__ATARI__)
+#  include <atari.h>
+#elif defined(__ATARI2600__)
+#  include <atari2600.h>
+#elif defined(__ATARI5200__)
+#  include <atari5200.h>
+#elif defined(__ATMOS__)
+#  include <atmos.h>
+#elif defined(__CBM__)
+#  include <cbm.h>
+#elif defined(__CREATIVISION__)
+#  include <creativision.h>
+#elif defined(__GAMATE__)
+#  include <gamate.h>
+#elif defined(__GEOS__)
+#  include <geos.h>
+#elif defined(__LYNX__)
+#  include <lynx.h>
+#elif defined(__NES__)
+#  include <nes.h>
+#elif defined(__OSIC1P__)
+#  include <osic1p.h>
+#elif defined(__PCE__)
+#  include <pce.h>
+#elif defined(__SUPERVISION__)
+#  include <supervision.h>
+#elif defined(__TELESTRAT__)
+#  include <telestrat.h>
 #endif
 
 
 
-/* Include the base header file for the 264 series. include file.
- */
-#include <cbm264.h>
-
-
-
-/* The addresses of the static drivers */
-extern unsigned char c16_ram_emd[];
-extern unsigned char c16_stdjoy_joy[];  /* Referred to by joy_static_stddrv[] */
-
-
-
-/* End of c16.h */
+/* End of target.h */
 #endif
