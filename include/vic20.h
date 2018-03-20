@@ -105,7 +105,8 @@
 extern unsigned char vic20_ptvjoy_joy[];
 extern unsigned char vic20_stdjoy_joy[];         /* Referred to by joy_static_stddrv[] */
 
-
+extern void vic20_rama_emd[];
+extern void vic20_georam_emd[];
 
 /* End of vic20.h */
 #endif
