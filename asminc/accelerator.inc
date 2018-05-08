@@ -40,3 +40,41 @@ C64DTV_Extended_Regs := $D03F
 
 C64DTV_Slow = $00
 C64DTV_Fast = $03
+
+
+; ---------------------------------------------------------------------------
+; C128 native and C128 in C64 mode
+
+C128_VICIIE_CLK := $D030
+
+
+; ---------------------------------------------------------------------------
+; C64 Chameleon cartridge
+
+CHAMELEON_CFGTUR := $D0F3
+CHAMELEON_CFGENA := $D0FE
+
+CHAMELEON_ENABLE_REGS  = $2A
+CHAMELEON_DISABLE_REGS = $FF
+
+CHAMELEON_CFGTUR_LIMIT_1MHZ = %00001100
+CHAMELEON_CFGTUR_LIMIT_NONE = %10000000
+
+
+; ---------------------------------------------------------------------------
+; C65/C64DX in C64 mode
+
+C65_VICIII_KEY    := $D02F
+C65_VICIII_CTRL_B := $D031
+
+C65_VICIII_UNLOCK_1 = $A5
+C65_VICIII_UNLOCK_2 = $96
+
+
+; ---------------------------------------------------------------------------
+; C64 Turbo Master cartridge
+
+TURBOMASTER_DETECT    := $BF53
+
+TURBOMASTER_SPEED_REG := $00
+
