@@ -513,6 +513,7 @@ static int CompoundStatement (void)
 
     /* Remember the stack at block entry */
     int OldStack = StackPtr;
+    unsigned OldBlockStackSize = CollCount (&CurrentFunc->LocalsBlockStack);
 
     /* Enter a new lexical level */
     EnterBlockLevel ();
@@ -534,6 +535,14 @@ static int CompoundStatement (void)
     if (!GotBreak) {
         g_space (StackPtr - OldStack);
     }
+
+    /* If the segment had autoinited variables, let's pop it of a stack
+    ** of such blocks.
+    */
+    if (OldBlockStackSize != CollCount (&CurrentFunc->LocalsBlockStack)) {
+        CollPop (&CurrentFunc->LocalsBlockStack);
+    }
+
     StackPtr = OldStack;
 
     /* Emit references to imports/exports for this block */

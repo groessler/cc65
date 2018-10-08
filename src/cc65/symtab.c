@@ -57,6 +57,8 @@
 #include "symentry.h"
 #include "typecmp.h"
 #include "symtab.h"
+#include "function.h"
+#include "input.h"
 
 
 
@@ -658,10 +660,31 @@ SymEntry* AddConstSym (const char* Name, const Type* T, unsigned Flags, long Val
 }
 
 
+DefOrRef* AddDefOrRef(SymEntry* E, unsigned Flags)
+/* Add definition or reference to the SymEntry and preserve its attributes */
+{
+    DefOrRef *DOR;
+
+    DOR = xmalloc (sizeof (DefOrRef));
+    CollAppend (E->V.L.DefsOrRefs, DOR);
+    DOR->Line = GetCurrentLine ();
+    DOR->LocalsBlockId = (long)CollLast (&CurrentFunc->LocalsBlockStack);
+    DOR->Flags = Flags;
+    DOR->StackPtr = StackPtr;
+    DOR->Depth = CollCount (&CurrentFunc->LocalsBlockStack);
+    DOR->LateSP_Label = GetLocalLabel ();
+
+    return DOR;
+}
 
 SymEntry* AddLabelSym (const char* Name, unsigned Flags)
 /* Add a goto label to the label table */
 {
+    unsigned i;
+    DefOrRef *DOR, *NewDOR;
+    /* We juggle it so much that a shortcut will help with clarity */
+    Collection *AIC = &CurrentFunc->LocalsBlockStack;
+
     /* Do we have an entry with this name already? */
     SymEntry* Entry = FindSymInTable (LabelTab, Name, HashStr (Name));
     if (Entry) {
@@ -670,6 +693,58 @@ SymEntry* AddLabelSym (const char* Name, unsigned Flags)
             /* Trying to define the label more than once */
             Error ("Label `%s' is defined more than once", Name);
         }
+
+        NewDOR = AddDefOrRef (Entry, Flags);
+
+        /* Walk through all occurrences of the label so far and evaluate
+        ** their relationship with the one passed to the function.
+        */
+        for (i = 0; i < CollCount (Entry->V.L.DefsOrRefs); i++) {
+            DOR = CollAt (Entry->V.L.DefsOrRefs, i);
+
+            if ((DOR->Flags & SC_DEF) && (Flags & SC_REF) && (Flags & SC_GOTO)) {
+                /* We're processing a goto and here is its destination label.
+                ** This means the difference between SP values is already known,
+                ** so we simply emit the SP adjustment code.
+                */
+                if (StackPtr != DOR->StackPtr) {
+                    g_space (StackPtr - DOR->StackPtr);
+                }
+
+                /* Are we jumping into a block with initalization of an object that
+                ** has automatic storage duration? Let's emit a warning.
+                */
+                if ((long)CollLast (AIC) != DOR->LocalsBlockId &&
+                    (CollCount (AIC) < DOR->Depth ||
+                    (long)CollAt (AIC, DOR->Depth - 1) != DOR->LocalsBlockId)) {
+                    Warning ("Goto at line %d to label %s jumps into a block with "
+                    "initialization of an object that has automatic storage duration",
+                    GetCurrentLine (), Name);
+                }
+            }
+
+
+            if ((DOR->Flags & SC_REF) && (DOR->Flags & SC_GOTO) && (Flags & SC_DEF)) {
+                /* We're processing a label, let's update all gotos encountered
+                ** so far
+                */
+                g_userodata();
+                g_defdatalabel (DOR->LateSP_Label);
+                g_defdata (CF_CONST | CF_INT, StackPtr - DOR->StackPtr, 0);
+
+                /* Are we jumping into a block with initalization of an object that
+                ** has automatic storage duration? Let's emit a warning.
+                */
+                if ((long)CollLast (AIC) != DOR->LocalsBlockId &&
+                    (CollCount (AIC) >= DOR->Depth ||
+                    (long)CollLast (AIC) >= (long)DOR->Line))
+                    Warning ("Goto at line %d to label %s jumps into a block with "
+                    "initialization of an object that has automatic storage duration",
+                    DOR->Line, Name);
+             }
+
+        }
+
         Entry->Flags |= Flags;
 
     } else {
@@ -678,14 +753,23 @@ SymEntry* AddLabelSym (const char* Name, unsigned Flags)
         Entry = NewSymEntry (Name, SC_LABEL | Flags);
 
         /* Set a new label number */
-        Entry->V.Label = GetLocalLabel ();
+        Entry->V.L.Label = GetLocalLabel ();
+
+        /* Create Collection for label definition and references */
+        Entry->V.L.DefsOrRefs = NewCollection ();
+        NewDOR = AddDefOrRef (Entry, Flags);
 
         /* Generate the assembler name of the label */
-        Entry->AsmName = xstrdup (LocalLabelName (Entry->V.Label));
+        Entry->AsmName = xstrdup (LocalLabelName (Entry->V.L.Label));
 
         /* Add the entry to the label table */
         AddSymEntry (LabelTab, Entry);
 
+    }
+
+    /* We are processing a goto, but the label has not yet been defined */
+    if (!SymIsDef (Entry) && (Flags & SC_REF) && (Flags & SC_GOTO)) {
+        g_lateadjustSP (NewDOR->LateSP_Label);
     }
 
     /* Return the entry */
@@ -717,12 +801,12 @@ SymEntry* AddLocalSym (const char* Name, const Type* T, unsigned Flags, int Offs
             Entry->V.R.RegOffs  = Offs;
             Entry->V.R.SaveOffs = StackPtr;
         } else if ((Flags & SC_EXTERN) == SC_EXTERN) {
-            Entry->V.Label = Offs;
+            Entry->V.L.Label = Offs;
             SymSetAsmName (Entry);
         } else if ((Flags & SC_STATIC) == SC_STATIC) {
             /* Generate the assembler name from the label number */
-            Entry->V.Label = Offs;
-            Entry->AsmName = xstrdup (LocalLabelName (Entry->V.Label));
+            Entry->V.L.Label = Offs;
+            Entry->AsmName = xstrdup (LocalLabelName (Entry->V.L.Label));
         } else if ((Flags & SC_STRUCTFIELD) == SC_STRUCTFIELD) {
             Entry->V.Offs = Offs;
         } else {
@@ -754,6 +838,12 @@ SymEntry* AddGlobalSym (const char* Name, const Type* T, unsigned Flags)
     if (Entry) {
 
         Type* EType;
+
+        /* Even if the symbol already exists, let's make sure it
+        ** is not an ENUM. See bug #728. */
+        if (Entry->Flags & SC_ENUM) {
+            Fatal ("Conflicting types for `%s'", Name);
+        }
 
         /* We have a symbol with this name already */
         if (Entry->Flags & SC_TYPE) {
