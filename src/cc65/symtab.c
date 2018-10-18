@@ -92,7 +92,7 @@ static SymTable*        SymTab          = 0;
 static SymTable*        TagTab0         = 0;
 static SymTable*        TagTab          = 0;
 static SymTable*        LabelTab        = 0;
-
+static SymTable*        SPAdjustTab     = 0;
 
 
 /*****************************************************************************/
@@ -225,6 +225,9 @@ void EnterGlobalLevel (void)
 
     /* Create and assign the tag table */
     TagTab0 = TagTab = NewSymTable (SYMTAB_SIZE_GLOBAL);
+
+    /* Create and assign the table of SP adjustment symbols */
+    SPAdjustTab = NewSymTable (SYMTAB_SIZE_GLOBAL);
 }
 
 
@@ -660,7 +663,7 @@ SymEntry* AddConstSym (const char* Name, const Type* T, unsigned Flags, long Val
 }
 
 
-DefOrRef* AddDefOrRef(SymEntry* E, unsigned Flags)
+DefOrRef* AddDefOrRef (SymEntry* E, unsigned Flags)
 /* Add definition or reference to the SymEntry and preserve its attributes */
 {
     DefOrRef *DOR;
@@ -675,6 +678,18 @@ DefOrRef* AddDefOrRef(SymEntry* E, unsigned Flags)
     DOR->LateSP_Label = GetLocalLabel ();
 
     return DOR;
+}
+
+unsigned short FindSPAdjustment (const char* Name)
+/* Search for an entry in the table of SP adjustments */
+{
+    SymEntry* Entry = FindSymInTable (SPAdjustTab, Name, HashStr (Name));
+
+    if (!Entry) {
+        Internal ("No SP adjustment label entry found");
+    }
+
+    return Entry->V.SPAdjustment;
 }
 
 SymEntry* AddLabelSym (const char* Name, unsigned Flags)
@@ -728,9 +743,17 @@ SymEntry* AddLabelSym (const char* Name, unsigned Flags)
                 /* We're processing a label, let's update all gotos encountered
                 ** so far
                 */
+                SymEntry *E;
                 g_userodata();
                 g_defdatalabel (DOR->LateSP_Label);
                 g_defdata (CF_CONST | CF_INT, StackPtr - DOR->StackPtr, 0);
+
+                /* Optimizer will need the information about the value of SP adjustment
+                ** later, so let's preserve it.
+                */
+                E = NewSymEntry (LocalLabelName (DOR->LateSP_Label), SC_SPADJUSTMENT);
+                E->V.SPAdjustment = StackPtr - DOR->StackPtr;
+                AddSymEntry (SPAdjustTab, E);
 
                 /* Are we jumping into a block with initalization of an object that
                 ** has automatic storage duration? Let's emit a warning.
@@ -836,13 +859,13 @@ SymEntry* AddGlobalSym (const char* Name, const Type* T, unsigned Flags)
     /* Do we have an entry with this name already? */
     SymEntry* Entry = FindSymInTable (Tab, Name, HashStr (Name));
     if (Entry) {
-
         Type* EType;
 
-        /* Even if the symbol already exists, let's make sure it
-        ** is not an ENUM. See bug #728. */
+        /* If the existing symbol is an enumerated constant,
+        ** then avoid a compiler crash.  See GitHub issue #728.
+        */
         if (Entry->Flags & SC_ENUM) {
-            Fatal ("Conflicting types for `%s'", Name);
+            Fatal ("Can't redeclare enum constant `%s' as global variable", Name);
         }
 
         /* We have a symbol with this name already */
