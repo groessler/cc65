@@ -73,6 +73,7 @@ struct __pokey_read {
     unsigned char   skstat; /* serial port status */
 };
 
+
 /* End of _pokey.h */
 #endif /* #ifndef __POKEY_H */
 
