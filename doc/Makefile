@@ -2,27 +2,30 @@ ifneq ($(shell echo),)
   CMD_EXE = 1
 endif
 
-.PHONY: all mostlyclean clean install zip doc html info
+.PHONY: all mostlyclean clean install zip doc html info pdf
 
 .SUFFIXES:
 
 htmldir = $(PREFIX)/share/doc/cc65$(DESTPACKAGE_SUFFIX)/html
 infodir = $(PREFIX)/share/info
+pdfdir = $(PREFIX)/share/doc/cc65$(DESTPACKAGE_SUFFIX)/pdf
 
 ifdef CMD_EXE
 
-doc clean install zip:
+# building of documentation is not supported on plain Windows
+doc clean install zip mostlyclean:
 
 else # CMD_EXE
 
 SGMLS := $(wildcard *.sgml)
 
-../html/coding.html ../html/index.html: \
-TOC_LEVEL = 0
-
 TOC_LEVEL = 2
 
+../html/coding.html ../html/index.html: TOC_LEVEL = 0
+
+RMDIR = $(RM) -rf
 INSTALL = install
+LATEX = latex
 
 doc: html info
 
@@ -30,7 +33,11 @@ html: $(addprefix ../html/,$(SGMLS:.sgml=.html) doc.css doc.png)
 
 info: $(addprefix ../info/,$(SGMLS:.sgml=.info))
 
-../html ../info:
+docwrk: $(addprefix ../docwrk/,$(SGMLS:.sgml=.dvi))
+
+pdf: $(addprefix ../pdf/,$(SGMLS:.sgml=.pdf))
+
+../html ../info ../pdf ../docwrk:
 	@mkdir $@
 
 ../html/%.html: %.sgml header.html | ../html
@@ -42,8 +49,35 @@ info: $(addprefix ../info/,$(SGMLS:.sgml=.info))
 ../info/%.info: %.sgml | ../info
 	@cd ../info && linuxdoc -B info ../doc/$<
 
+.PRECIOUS: ../docwrk/%.tex
+../docwrk/%.tex: %.sgml | ../docwrk
+	@cd ../docwrk && linuxdoc -B latex ../doc/$<
+
+../docwrk/%.dvi: ../docwrk/%.tex
+	@cd ../docwrk && \
+	rm -f $*.make.log; \
+	(logHash=aaa; \
+	lastLogHash=bbb; \
+	count=1; \
+	echo -n "Generating $*.pdf : "; \
+	while [ "$$lastLogHash" != "$$logHash" ]; \
+	  do \
+	   echo -n "..$$count"; \
+	   count=$$(expr $$count + 1);\
+	   $(LATEX) $< >> $*.make.log; \
+	   lastLogHash=$$logHash; \
+	   logHash=$$(md5sum $*.log); \
+	done;)
+	@echo "..done."
+
+../pdf/%.pdf: ../docwrk/%.dvi | ../pdf
+	@cd ../pdf && dvipdf $<
+
 clean:
-	$(RM) -r ../html ../info
+	$(RMDIR) ../html ../info ../pdf ../docwrk
+
+mostlyclean:
+	$(RMDIR) ../docwrk
 
 install:
 	$(if $(PREFIX),,$(error variable `PREFIX' must be set))
@@ -55,6 +89,10 @@ ifeq ($(wildcard ../info),../info)
 	$(INSTALL) -d $(DESTDIR)$(infodir)
 	$(INSTALL) -m0644 ../info/*.* $(DESTDIR)$(infodir)
 endif
+ifeq ($(wildcard ../pdf),../pdf)
+	$(INSTALL) -d $(DESTDIR)$(pdfdir)
+	$(INSTALL) -m0644 ../pdf/*.* $(DESTDIR)$(pdfdir)
+endif
 
 zip:
 ifneq "$(wildcard ../html)" ""
@@ -63,4 +101,4 @@ endif
 
 endif # CMD_EXE
 
-all mostlyclean:
+all:
