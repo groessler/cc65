@@ -137,6 +137,7 @@
 
 
 /* The addresses of the static drivers */
+extern unsigned char c64_65816_emd[];
 extern unsigned char c64_c256k_emd[];
 extern unsigned char c64_dqbb_emd[];
 extern unsigned char c64_georam_emd[];
