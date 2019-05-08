@@ -542,7 +542,7 @@ extern unsigned char atrx15p2_tgi[];
 ** to be overlaid by macros with the same names, saving the function call
 ** overhead.
 */
-#define _textcolor(color)        1
+#define _textcolor(color)        COLOR_WHITE
 
 /* End of atari.h */
 #endif
