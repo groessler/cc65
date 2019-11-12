@@ -65,6 +65,8 @@
 #  include <cbm610.h>
 #elif defined(__PET__)    && !defined(_PET_H)
 #  include <pet.h>
+#elif defined(__CX16__)   && !defined(_CX16_H)
+#  include <cx16.h>
 #endif
 
 /* Include definitions for CBM file types */
@@ -119,6 +121,8 @@ extern char _filetype;          /* Defaults to 's' */
 #define CH_STOP           3
 #define CH_LIRA          92
 #define CH_ESC           27
+#define CH_FONT_LOWER    14
+#define CH_FONT_UPPER   142
 
 
 
@@ -300,5 +304,3 @@ void __fastcall__ cbm_closedir (unsigned char lfn);
 
 /* End of cbm.h */
 #endif
-
-
