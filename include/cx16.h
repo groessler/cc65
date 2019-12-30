@@ -44,7 +44,19 @@
 
 
 
+/* Additional output character codes */
+#define CH_COLOR_SWAP           0x01
+#define CH_UNDERLINE            0x04
+#define CH_BOLD                 0x06
+#define CH_BACKSPACE            0x08
+#define CH_ITALIC               0x0B
+#define CH_OUTLINE              0x0C
+#define CH_FONT_ISO             0x0F
+#define CH_FONT_PET             0x8F
+
 /* Additional key defines */
+#define CH_SHIFT_TAB            0x18
+#define CH_HELP                 0x84
 #define CH_F1                   0x85
 #define CH_F2                   0x89
 #define CH_F3                   0x86
@@ -77,7 +89,8 @@
 #define COLOR_LIGHTBLUE         0x0E
 #define COLOR_GRAY3             0x0F
 
-/* Masks for joy_read() */
+/* NES controller masks for joy_read() */
+
 #define JOY_BTN_1_MASK  0x80
 #define JOY_BTN_2_MASK  0x40
 #define JOY_BTN_3_MASK  0x20
@@ -100,6 +113,9 @@
 #define JOY_FIRE2_MASK  JOY_BTN_2_MASK
 #define JOY_FIRE2(v)    ((v) & JOY_FIRE2_MASK)
 
+/* Additional mouse button mask */
+#define MOUSE_BTN_MIDDLE        0x02
+
 /* get_tv() return codes
 ** set_tv() argument codes
 */
@@ -112,18 +128,24 @@
 #define TV_NTSC_MONO    6
 #define TV_RGB2         7
 
-/* Video mode defines */
-#define VIDEOMODE_40x30         40u
-#define VIDEOMODE_80x60         80u
+/* Video modes for videomode() */
+#define VIDEOMODE_40x30         0x00
+#define VIDEOMODE_80x60         0x02
 #define VIDEOMODE_40COL         VIDEOMODE_40x30
 #define VIDEOMODE_80COL         VIDEOMODE_80x60
+#define VIDEOMODE_320x240       0x80
+#define VIDEOMODE_SWAP          (-1)
+
+/* VERA's interrupt flags */
+#define VERA_IRQ_VSYNC          0b00000001
+#define VERA_IRQ_RASTER         0b00000010
+#define VERA_IRQ_SPR_COLL       0b00000100
+#define VERA_IRQ_UART           0b00001000
 
 
-/* Define hardware */
+/* Define hardware. */
 
-/* Define a structure with the Video Enhanced Retro Adapter's
-** external registers.
-*/
+/* A structure with the Video Enhanced Retro Adapter's external registers */
 struct __vera {
     unsigned short      address;        /* Address for data ports */
     unsigned char       address_hi;
@@ -139,7 +161,7 @@ struct __vera {
 #define VIA1    (*(volatile struct __6522 *)0x9F60)
 #define VIA2    (*(volatile struct __6522 *)0x9F70)
 
-/* Define a structure with the x16emu's settings registers. */
+/* A structure with the x16emu's settings registers */
 struct __emul {
     unsigned char       debug;          /* Boolean: debugging enabled */
     unsigned char       vera_action;    /* Boolean: displaying VERA activity */
@@ -151,13 +173,17 @@ struct __emul {
     unsigned char       keymap;         /* Keyboard layout number */
        const char       detect[2];      /* "16" if running on x16emu */
 };
-#define EMULATOR (*(volatile struct __emul)0x9FB0)
+#define EMULATOR        (*(volatile struct __emul)0x9FB0)
+
+/* An array window into the half Mebibyte or two Mebibytes of banked RAM */
+#define BANK_RAM        ((unsigned char[0x2000])0xA000)
 
 
 
 /* The addresses of the static drivers */
 
-extern void cx16_stdjoy_joy[];          /* Referred to by joy_static_stddrv[] */
+extern void cx16_std_joy[];             /* Referred to by joy_static_stddrv[] */
+extern void cx16_std_mou[];             /* Referred to by mouse_static_stddrv[] */
 
 
 
@@ -174,14 +200,20 @@ signed char get_ostype (void);
 ** Positive -- release build
 */
 
+unsigned char get_tv (void);
+/* Return the video type that the machine is using.
+** Return a TV_xx constant.
+*/
+
 void __fastcall__ set_tv (unsigned char type);
 /* Set the video type that the machine will use.
 ** Call with a TV_xx constant.
 */
 
-unsigned char __fastcall__ videomode (unsigned char mode);
-/* Set the video mode, return the old mode. Call with one of the VIDEOMODE_xx
-** constants.
+signed char __fastcall__ videomode (signed char mode);
+/* Set the video mode, return the old mode.
+** Return -1 if Mode isn't valid.
+** Call with one of the VIDEOMODE_xx constants.
 */
 
 unsigned char __fastcall__ vpeek (unsigned long addr);

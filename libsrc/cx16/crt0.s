@@ -1,5 +1,5 @@
 ;
-; Start-up code for cc65 (CX16 version)
+; Start-up code for cc65 (CX16 r35 version)
 ;
 
         .export         _exit
@@ -9,7 +9,6 @@
         .import         zerobss, callmain
         .import         CHROUT
         .import         __MAIN_START__, __MAIN_SIZE__   ; Linker-generated
-        .importzp       ST
 
         .include        "zeropage.inc"
         .include        "cx16.inc"
@@ -36,11 +35,18 @@ Start:  tsx
 
         jsr     callmain
 
-; Back from main() [this is also the exit() entry]. Run the module destructors.
+; Back from main() [this is also the exit() entry].
 
-_exit:  pha                     ; Save the return code on stack
+_exit:
+; Put the program return code into BASIC's status variable.
+
+        sta     STATUS
+
+; Run the module destructors.
+
         jsr     donelib
 
+.if 0   ; We don't need to preserve zero-page space for cc65's variables.
 ; Copy back the zero-page stuff.
 
         ldx     #zpspace-1
@@ -48,11 +54,7 @@ L2:     lda     zpsave,x
         sta     sp,x
         dex
         bpl     L2
-
-; Place the program return code into BASIC's status variable.
-
-        pla
-        sta     ST
+.endif
 
 ; Restore the system stuff.
 
@@ -81,13 +83,14 @@ init:
         and     #<~$07
         sta     VIA1::PRB
 
-; Change to the first RAM bank.
+; Change to the second RAM bank.
 
         lda     VIA1::PRA2
         sta     ramsave         ; Save the current RAM bank number
-        lda     #$00            ; Choose RAM bank zero
+        lda     #$01
         sta     VIA1::PRA2
 
+.if 0   ; We don't need to preserve zero-page space for cc65's variables.
 ; Save the zero-page locations that we need.
 
         ldx     #zpspace-1
@@ -95,6 +98,7 @@ L1:     lda     sp,x
         sta     zpsave,x
         dex
         bpl     L1
+.endif
 
 ; Set up the stack.
 
@@ -103,7 +107,7 @@ L1:     lda     sp,x
         sta     sp
         stx     sp+1            ; Set argument stack ptr
 
-; Switch to the second charset.
+; Switch to the lower/UPPER PetSCII charset.
 
         lda     #$0E
         jsr     CHROUT
@@ -121,4 +125,6 @@ L1:     lda     sp,x
 ramsave:
         .res    1
 spsave: .res    1
+.if 0
 zpsave: .res    zpspace
+.endif
