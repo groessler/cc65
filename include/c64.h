@@ -142,6 +142,7 @@ extern unsigned char c64_c256k_emd[];
 extern unsigned char c64_dqbb_emd[];
 extern unsigned char c64_georam_emd[];
 extern unsigned char c64_isepic_emd[];
+extern unsigned char c64_kerberos_emd[];
 extern unsigned char c64_ram_emd[];
 extern unsigned char c64_ramcart_emd[];
 extern unsigned char c64_reu_emd[];
