@@ -1479,52 +1479,10 @@ void g_scale (unsigned flags, long val)
 
         /* Scale down */
         val = -val;
-        if ((p2 = PowerOf2 (val)) > 0 && p2 <= 4) {
 
-            /* Factor is 2, 4, 8 and 16 use special function */
-            switch (flags & CF_TYPEMASK) {
-
-                case CF_CHAR:
-                    if (flags & CF_FORCECHAR) {
-                        if (flags & CF_UNSIGNED) {
-                            while (p2--) {
-                                AddCodeLine ("lsr a");
-                            }
-                            break;
-                        } else if (p2 <= 2) {
-                            AddCodeLine ("cmp #$80");
-                            AddCodeLine ("ror a");
-                            break;
-                        }
-                    }
-                    /* FALLTHROUGH */
-
-                case CF_INT:
-                    if (flags & CF_UNSIGNED) {
-                        AddCodeLine ("jsr lsrax%d", p2);
-                    } else {
-                        AddCodeLine ("jsr asrax%d", p2);
-                    }
-                    break;
-
-                case CF_LONG:
-                    if (flags & CF_UNSIGNED) {
-                        AddCodeLine ("jsr lsreax%d", p2);
-                    } else {
-                        AddCodeLine ("jsr asreax%d", p2);
-                    }
-                    break;
-
-                default:
-                    typeerror (flags);
-
-            }
-
-        } else if (val != 1) {
-
-            /* Use a division instead */
+        /* Use a division instead */
+        if (val != 1) {
             g_div (flags | CF_CONST, val);
-
         }
     }
 }
@@ -2669,19 +2627,102 @@ void g_div (unsigned flags, unsigned long val)
     };
 
     /* Do strength reduction if the value is constant and a power of two */
-    int p2;
-    if ((flags & CF_CONST) && (p2 = PowerOf2 (val)) >= 0) {
+    if (flags & CF_CONST) {
+
+        /* Deal with negative values as well as different sizes */
+        int           Negation   = (flags & CF_UNSIGNED) == 0 && (long)val < 0;
+        unsigned long NegatedVal = (unsigned long)-(long)val;
+        int           p2         = PowerOf2 (Negation ? NegatedVal : val);
+
         /* Generate a shift instead */
-        g_asr (flags, p2);
-    } else {
-        /* Generate a division */
-        if (flags & CF_CONST) {
-            /* lhs is not on stack */
-            flags &= ~CF_FORCECHAR;     /* Handle chars as ints */
-            g_push (flags & ~CF_CONST, 0);
+        if ((flags & CF_UNSIGNED) != 0 && p2 > 0) {
+            g_asr (flags, p2);
+            return;
         }
-        oper (flags, val, ops);
+
+        /* Check if we can afford using shift instead of multiplication at the
+        ** cost of code size */
+        if (p2 == 0 || (p2 > 0 && IS_Get (&CodeSizeFactor) >= (Negation ? 200 : 170))) {
+            /* Generate a conditional shift instead */
+            if (p2 > 0) {
+                unsigned int  DoShiftLabel = GetLocalLabel ();
+                unsigned int  EndLabel     = GetLocalLabel ();
+                unsigned long MaskedVal    = Negation ? val : NegatedVal;
+
+                /* GitHub #169 - if abs(expr) < abs(val), the result is always 0.
+                ** First, check whether expr >= 0 and skip to the shift if true.
+                */
+                switch (flags & CF_TYPEMASK) {
+                case CF_CHAR:
+                    if (flags & CF_FORCECHAR) {
+                        MaskedVal &= 0xFF;
+                        AddCodeLine ("cmp #$00");
+                        AddCodeLine ("bpl %s", LocalLabelName (DoShiftLabel));
+                        break;
+                    }
+                    /* FALLTHROUGH */
+
+                case CF_INT:
+                    MaskedVal &= 0xFFFF;
+                    AddCodeLine ("cpx #$00");
+                    AddCodeLine ("bpl %s", LocalLabelName (DoShiftLabel));
+                    break;
+
+                case CF_LONG:
+                    MaskedVal &= 0xFFFFFFFF;
+                    AddCodeLine ("ldy sreg+1");
+                    AddCodeLine ("bpl %s", LocalLabelName (DoShiftLabel));
+                    break;
+
+                default:
+                    typeerror (flags);
+                    break;
+                }
+                /* Second, check whether expr <= -asb(val) and skip to the
+                ** shift if true. The original content of expr has to be saved
+                ** before the checking comparison and restored after that, as
+                ** the content in Primary register will be destroyed.
+                ** The result of the comparison is a boolean. We can store
+                ** it in the Carry flag with a LSR and branch on it later.
+                */
+                g_save (flags);
+                g_le (flags | CF_UNSIGNED, MaskedVal);
+                AddCodeLine ("lsr a");
+                g_restore (flags);
+                AddCodeLine ("bcs %s", LocalLabelName (DoShiftLabel));
+ 
+                /* The result is 0. We can just load 0 and skip the shifting. */
+                g_getimmed (flags | CF_ABSOLUTE, 0, 0);
+                g_jump (EndLabel);
+
+                /* Do the shift. The sign of the result may need be corrected
+                ** later.
+                */
+                g_defcodelabel (DoShiftLabel);
+                g_asr (flags, p2);
+                g_defcodelabel (EndLabel);
+            }
+
+            /* Negate the result as long as val < 0, even if val == -1 and no
+            ** shift was generated. */
+            if (Negation) {
+                g_neg (flags);
+            }
+
+            /* Done */
+            return;
+        }
+
+        /* If we go here, we didn't emit code. Push the lhs on stack and fall
+        ** into the normal, non-optimized stuff.
+        */
+        flags &= ~CF_FORCECHAR; /* Handle chars as ints */
+        g_push (flags & ~CF_CONST, 0);
     }
+
+    /* Generate a division */
+    oper (flags, val, ops);
+
 }
 
 
@@ -2956,6 +2997,22 @@ void g_asr (unsigned flags, unsigned long val)
         switch (flags & CF_TYPEMASK) {
 
             case CF_CHAR:
+                if (flags & CF_FORCECHAR) {
+                    if ((flags & CF_UNSIGNED) != 0 && val <= 4) {
+                        while (val--) {
+                            AddCodeLine ("lsr a");
+                        }
+                        return;
+                    } else if (val <= 2) {
+                        while (val--) {
+                            AddCodeLine ("cmp #$80");
+                            AddCodeLine ("ror a");
+                        }
+                        return;
+                    }
+                }
+                /* FALLTHROUGH */
+
             case CF_INT:
                 val &= 0x0F;
                 if (val >= 8) {
