@@ -111,6 +111,25 @@
 #define COLOR_LIGHTBLUE         0x0E
 #define COLOR_GRAY3             0x0F
 
+/* TGI color defines */
+#define TGI_COLOR_BLACK         COLOR_BLACK
+#define TGI_COLOR_WHITE         COLOR_WHITE
+#define TGI_COLOR_RED           COLOR_RED
+#define TGI_COLOR_CYAN          COLOR_CYAN
+#define TGI_COLOR_VIOLET        COLOR_VIOLET
+#define TGI_COLOR_PURPLE        COLOR_PURPLE
+#define TGI_COLOR_GREEN         COLOR_GREEN
+#define TGI_COLOR_BLUE          COLOR_BLUE
+#define TGI_COLOR_YELLOW        COLOR_YELLOW
+#define TGI_COLOR_ORANGE        COLOR_ORANGE
+#define TGI_COLOR_BROWN         COLOR_BROWN
+#define TGI_COLOR_LIGHTRED      COLOR_LIGHTRED
+#define TGI_COLOR_GRAY1         COLOR_GRAY1
+#define TGI_COLOR_GRAY2         COLOR_GRAY2
+#define TGI_COLOR_LIGHTGREEN    COLOR_LIGHTGREEN
+#define TGI_COLOR_LIGHTBLUE     COLOR_LIGHTBLUE
+#define TGI_COLOR_GRAY3         COLOR_GRAY3
+
 /* NES controller masks for joy_read() */
 
 #define JOY_BTN_1_MASK          0x80
@@ -271,7 +290,7 @@ struct __emul {
     unsigned char       keymap;         /* Keyboard layout number */
        const char       detect[2];      /* "16" if running on x16emu */
 };
-#define EMULATOR        (*(volatile struct __emul)0x9FB0)
+#define EMULATOR        (*(volatile struct __emul *)0x9FB0)
 
 /* An array window into the half Mebibyte or two Mebibytes of banked RAM */
 #define BANK_RAM        ((unsigned char[0x2000])0xA000)
@@ -280,8 +299,9 @@ struct __emul {
 
 /* The addresses of the static drivers */
 
-extern void cx16_std_joy[];             /* Referred to by joy_static_stddrv[] */
-extern void cx16_std_mou[];             /* Referred to by mouse_static_stddrv[] */
+extern void cx16_std_joy[];             /* Referenced by joy_static_stddrv[] */
+extern void cx16_std_mou[];             /* Referenced by mouse_static_stddrv[] */
+extern void cx320p1_tgi[];              /* Referenced by tgi_static_stddrv[] */
 
 
 
