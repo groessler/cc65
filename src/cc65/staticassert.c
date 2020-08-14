@@ -1,15 +1,12 @@
 /*****************************************************************************/
 /*                                                                           */
-/*                                typeconv.h                                 */
+/*                               staticassert.h                              */
 /*                                                                           */
-/*                          Handle type conversions                          */
+/*          _Static_assert handling for the cc65 C compiler                  */
 /*                                                                           */
 /*                                                                           */
 /*                                                                           */
-/* (C) 2002-2008 Ullrich von Bassewitz                                       */
-/*               Roemerstrasse 52                                            */
-/*               D-70794 Filderstadt                                         */
-/* EMail:        uz@cc65.org                                                 */
+/* Copyright 2020 The cc65 Authors                                           */
 /*                                                                           */
 /*                                                                           */
 /* This software is provided 'as-is', without any expressed or implied       */
@@ -33,36 +30,67 @@
 
 
 
-#ifndef TYPECONV_H
-#define TYPECONV_H
-
-
-
 /* cc65 */
-#include "exprdesc.h"
+#include "error.h"
+#include "expr.h"
+#include "litpool.h"
+#include "scanner.h"
+#include "staticassert.h"
 
 
 
 /*****************************************************************************/
-/*                                   Code                                    */
+/*                      _Static_assert handling functions                    */
 /*****************************************************************************/
 
 
 
-void TypeCompatibilityDiagnostic (const Type* NewType, const Type* OldType, int IsError, const char* Msg);
-/* Print error or warning message about type conversion with proper type names */
+void ParseStaticAssert ()
+{
+    /*
+    ** static_assert-declaration ::=
+    **     _Static_assert ( constant-expression , string-literal ) ;
+    */
+    ExprDesc Expr;
+    int failed;
 
-void TypeConversion (ExprDesc* Expr, const Type* NewType);
-/* Do an automatic conversion of the given expression to the new type. Output
-** warnings or errors where this automatic conversion is suspicious or
-** impossible.
-*/
+    /* Skip the _Static_assert token itself */
+    CHECK (CurTok.Tok == TOK_STATIC_ASSERT);
+    NextToken ();
 
-void TypeCast (ExprDesc* Expr);
-/* Handle an explicit cast. */
+    /* We expect an opening paren */
+    if (!ConsumeLParen ()) {
+        return;
+    }
 
+    /* Parse assertion condition */
+    ConstAbsIntExpr (hie1, &Expr);
+    failed = !Expr.IVal;
 
+    /* We expect a comma */
+    if (!ConsumeComma ()) {
+        return;
+    }
 
-/* End of typeconv.h */
+    /* String literal */
+    if (CurTok.Tok != TOK_SCONST) {
+        Error ("String literal expected for static_assert message");
+        return;
+    }
 
-#endif
+    /* Issue an error including the message if the static_assert failed. */
+    if (failed) {
+        Error ("static_assert failed '%s'", GetLiteralStr (CurTok.SVal));
+    }
+
+    /* Consume the string constant, now that we don't need it anymore.
+    ** This should never fail since we checked the token type above.
+    */
+    if (!Consume (TOK_SCONST, "String literal expected")) {
+        return;
+    }
+
+    /* Closing paren and semi-colon needed */
+    ConsumeRParen ();
+    ConsumeSemi ();
+}

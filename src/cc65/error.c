@@ -38,7 +38,9 @@
 #include <stdarg.h>
 
 /* common */
+#include "coll.h"
 #include "print.h"
+#include "strbuf.h"
 
 /* cc65 */
 #include "global.h"
@@ -91,6 +93,8 @@ static WarnMapEntry WarnMap[] = {
     { &WarnUnusedParam,         "unused-param"          },
     { &WarnUnusedVar,           "unused-var"            },
 };
+
+Collection DiagnosticStrBufs;
 
 
 
@@ -180,7 +184,7 @@ static void IntError (const char* Filename, unsigned LineNo, const char* Msg, va
         Print (stderr, 1, "Input: %.*s\n", (int) SB_GetLen (Line), SB_GetConstBuf (Line));
     }
     ++ErrorCount;
-    if (ErrorCount > 10) {
+    if (ErrorCount > 20) {
         Fatal ("Too many errors");
     }
 }
@@ -321,5 +325,53 @@ void ListWarnings (FILE* F)
 void ErrorReport (void)
 /* Report errors (called at end of compile) */
 {
-    Print (stdout, 1, "%u errors, %u warnings\n", ErrorCount, WarningCount);
+    unsigned int V = (ErrorCount != 0 ? 0 : 1);
+    Print (stdout, V, "%u errors and %u warnings generated.\n", ErrorCount, WarningCount);
+}
+
+
+
+/*****************************************************************************/
+/*                              Tracked StrBufs                              */
+/*****************************************************************************/
+
+
+
+void InitDiagnosticStrBufs (void)
+/* Init tracking string buffers used for diagnostics */
+{
+    InitCollection (&DiagnosticStrBufs);
+}
+
+
+
+void DoneDiagnosticStrBufs (void)
+/* Done with tracked string buffers used for diagnostics */
+{
+    ClearDiagnosticStrBufs ();
+    DoneCollection (&DiagnosticStrBufs);
+}
+
+
+
+void ClearDiagnosticStrBufs (void)
+/* Free all tracked string buffers */
+{
+    unsigned I;
+
+    for (I = 0; I < CollCount (&DiagnosticStrBufs); ++I) {
+        SB_Done (CollAtUnchecked (&DiagnosticStrBufs, I));
+    }
+
+    CollDeleteAll (&DiagnosticStrBufs);
+}
+
+
+
+struct StrBuf* NewDiagnosticStrBuf (void)
+/* Get a new tracked string buffer */
+{
+    StrBuf *Buf = NewStrBuf ();
+    CollAppend (&DiagnosticStrBufs, Buf);
+    return Buf;
 }

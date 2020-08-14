@@ -61,6 +61,7 @@
 #include "pragma.h"
 #include "preproc.h"
 #include "standard.h"
+#include "staticassert.h"
 #include "symtab.h"
 
 
@@ -108,6 +109,12 @@ static void Parse (void)
             continue;
         }
 
+        /* Check for a _Static_assert */
+        if (CurTok.Tok == TOK_STATIC_ASSERT) {
+            ParseStaticAssert ();
+            continue;
+        }
+
         /* Read variable defs and functions */
         ParseDeclSpec (&Spec, SC_EXTERN | SC_STATIC, T_INT);
 
@@ -139,6 +146,11 @@ static void Parse (void)
             if (Decl.Ident[0] == '\0') {
                 NextToken ();
                 break;
+            }
+
+            if ((Decl.StorageClass & SC_FICTITIOUS) == SC_FICTITIOUS) {
+                /* Failed parsing */
+                goto SkipOneDecl;
             }
 
             /* Check if we must reserve storage for the variable. We do this,
@@ -241,15 +253,10 @@ static void Parse (void)
                         /* We cannot declare variables of type void */
                         Error ("Illegal type for variable '%s'", Decl.Ident);
                         Entry->Flags &= ~(SC_STORAGE | SC_DEF);
-                    } else if (Size == 0) {
+                    } else if (Size == 0 && SymIsDef (Entry)) {
                         /* Size is unknown. Is it an array? */
                         if (!IsTypeArray (Decl.Type)) {
                             Error ("Variable '%s' has unknown size", Decl.Ident);
-                        }
-                        /* Do this only if the same array has not been defined */
-                        if (!SymIsDef (Entry)) {
-                            Entry->Flags &= ~(SC_STORAGE | SC_DEF);
-                            Entry->Flags |= SC_DECL;
                         }
                     } else {
                         /* A global (including static) uninitialized variable is
@@ -269,11 +276,21 @@ static void Parse (void)
                                    Entry->Name, Entry->V.BssName);
                         }
                         Entry->V.BssName = xstrdup (bssName);
+
+                        /* Check for enum forward declaration.
+                        ** Warn about it when extensions are not allowed.
+                        */
+                        if (Size == 0 && IsTypeEnum (Decl.Type)) {
+                            if (IS_Get (&Standard) != STD_CC65) {
+                                Warning ("ISO C forbids forward references to 'enum' types");
+                            }
+                        }
                     }
                 }
 
             }
 
+SkipOneDecl:
             /* Check for end of declaration list */
             if (CurTok.Tok == TOK_COMMA) {
                 NextToken ();
@@ -408,9 +425,61 @@ void Compile (const char* FileName)
 
     } else {
 
+        /* Used for emitting externals */
+        SymEntry* Entry;
+
         /* Ok, start the ball rolling... */
         Parse ();
 
+        /* Reset the BSS segment name to its default; so that the below strcmp()
+        ** will work as expected, at the beginning of the list of variables
+        */
+        SetSegName (SEG_BSS, SEGNAME_BSS);
+
+        /* Walk over all global symbols and generate code for uninitialized
+        ** global variables.
+        */
+        for (Entry = GetGlobalSymTab ()->SymHead; Entry; Entry = Entry->NextSym) {
+            if ((Entry->Flags & (SC_STORAGE | SC_DEF | SC_STATIC)) == (SC_STORAGE | SC_STATIC)) {
+                /* Assembly definition of uninitialized global variable */
+                SymEntry* Sym = GetSymType (Entry->Type);
+                unsigned Size = SizeOf (Entry->Type);
+                if (Size == 0 && IsTypeArray (Entry->Type)) {
+                    if (GetElementCount (Entry->Type) == UNSPECIFIED) {
+                        /* Assume array size of 1 */
+                        SetElementCount (Entry->Type, 1);
+                        Size = SizeOf (Entry->Type);
+                        Warning ("Incomplete array '%s[]' assumed to have one element", Entry->Name);
+                    }
+
+                    Sym = GetSymType (GetElementType (Entry->Type));
+                    if (Size == 0 && Sym != 0 && SymIsDef (Sym)) {
+                        /* Array of 0-size elements */
+                        Warning ("Array '%s[]' has 0-sized elements", Entry->Name);
+                    }
+                }
+
+                /* For non-ESU types, Size != 0 */
+                if (Size != 0 || (Sym != 0 && SymIsDef (Sym))) {
+                    /* Set the segment name only when it changes */
+                    if (strcmp (GetSegName (SEG_BSS), Entry->V.BssName) != 0) {
+                        SetSegName (SEG_BSS, Entry->V.BssName);
+                        g_segname (SEG_BSS);
+                    }
+                    g_usebss ();
+                    g_defgloblabel (Entry->Name);
+                    g_res (Size);
+
+                    /* Mark as defined; so that it will be exported, not imported */
+                    Entry->Flags |= SC_DEF;
+                } else {
+                    /* Tentative declared variable is still of incomplete type */
+                    Error ("Definition of '%s' has type '%s' that is never completed",
+                           Entry->Name,
+                           GetFullTypeName (Entry->Type));
+                }
+            }
+        }
     }
 
     if (Debug) {
@@ -424,18 +493,12 @@ void Compile (const char* FileName)
 
 
 void FinishCompile (void)
-/* Emit literals, externals, debug info, do cleanup and optimizations */
+/* Emit literals, debug info, do cleanup and optimizations */
 {
     SymEntry* Entry;
 
-    /* Reset the BSS segment name to its default; so that the below strcmp()
-    ** will work as expected, at the beginning of the list of variables
-    */
-    SetSegName (SEG_BSS, SEGNAME_BSS);
-
-    /* Walk over all global symbols:
-    ** - for functions, do clean-up and optimizations
-    ** - generate code for uninitialized global variables
+    /* Walk over all global symbols and do clean-up and optimizations for
+    ** functions.
     */
     for (Entry = GetGlobalSymTab ()->SymHead; Entry; Entry = Entry->NextSym) {
         if (SymIsOutputFunc (Entry)) {
@@ -443,19 +506,6 @@ void FinishCompile (void)
             MoveLiteralPool (Entry->V.F.LitPool);
             CS_MergeLabels (Entry->V.F.Seg->Code);
             RunOpt (Entry->V.F.Seg->Code);
-        } else if ((Entry->Flags & (SC_STORAGE | SC_DEF | SC_STATIC)) == (SC_STORAGE | SC_STATIC)) {
-            /* Assembly definition of uninitialized global variable */
-
-            /* Set the segment name only when it changes */
-            if (strcmp (GetSegName (SEG_BSS), Entry->V.BssName) != 0) {
-                SetSegName (SEG_BSS, Entry->V.BssName);
-                g_segname (SEG_BSS);
-            }
-            g_usebss ();
-            g_defgloblabel (Entry->Name);
-            g_res (SizeOf (Entry->Type));
-            /* Mark as defined; so that it will be exported, not imported */
-            Entry->Flags |= SC_DEF;
         }
     }
 

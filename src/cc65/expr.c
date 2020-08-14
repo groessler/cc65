@@ -244,6 +244,23 @@ static int TypeSpecAhead (void)
 
 
 
+static unsigned ExprCheckedSizeOf (const Type* T)
+/* Specially checked SizeOf() used in 'sizeof' expressions */
+{
+    unsigned Size = SizeOf (T);
+    SymEntry* Sym;
+
+    if (Size == 0) {
+        Sym = GetSymType (T);
+        if (Sym == 0 || !SymIsDef (Sym)) {
+            Error ("Cannot apply 'sizeof' to incomplete type '%s'", GetFullTypeName (T));
+        }
+    }
+    return Size;
+}
+
+
+
 void PushAddr (const ExprDesc* Expr)
 /* If the expression contains an address that was somehow evaluated,
 ** push this address on the stack. This is a helper function for all
@@ -585,7 +602,7 @@ static void FunctionCall (ExprDesc* Expr)
             }
 
             /* Call the function */
-            g_callind (TypeOf (Expr->Type+1), ParamSize, PtrOffs);
+            g_callind (FuncTypeOf (Expr->Type+1), ParamSize, PtrOffs);
 
         } else {
 
@@ -646,9 +663,9 @@ static void FunctionCall (ExprDesc* Expr)
 
             SB_Done (&S);
 
-            g_call (TypeOf (Expr->Type), Func->WrappedCall->Name, ParamSize);
+            g_call (FuncTypeOf (Expr->Type), Func->WrappedCall->Name, ParamSize);
         } else {
-            g_call (TypeOf (Expr->Type), (const char*) Expr->Name, ParamSize);
+            g_call (FuncTypeOf (Expr->Type), (const char*) Expr->Name, ParamSize);
         }
 
     }
@@ -903,8 +920,35 @@ static void Primary (ExprDesc* E)
             /* Illegal primary. Be sure to skip the token to avoid endless
             ** error loops.
             */
-            Error ("Expression expected");
-            NextToken ();
+            {
+                /* Let's see if this is a C99-style declaration */
+                DeclSpec    Spec;
+                InitDeclSpec (&Spec);
+                ParseDeclSpec (&Spec, -1, T_QUAL_NONE);
+
+                if (Spec.Type->C != T_END) {
+
+                    Error ("Mixed declarations and code are not supported in cc65");
+                    while (CurTok.Tok != TOK_SEMI) {
+                        Declaration Decl;
+
+                        /* Parse one declaration */
+                        ParseDecl (&Spec, &Decl, DM_ACCEPT_IDENT);
+                        if (CurTok.Tok == TOK_ASSIGN) {
+                            NextToken ();
+                            ParseInit (Decl.Type);
+                        }
+                        if (CurTok.Tok == TOK_COMMA) {
+                            NextToken ();
+                        } else {
+                            break;
+                        }
+                    }
+                } else {
+                    Error ("Expression expected");
+                    NextToken ();
+                }
+            }
             ED_MakeConstAbsInt (E, 1);
             break;
     }
@@ -1201,7 +1245,6 @@ static void StructRef (ExprDesc* Expr)
 /* Process struct/union field after . or ->. */
 {
     ident Ident;
-    SymEntry* Field;
     Type* FinalType;
     TypeCode Q;
 
@@ -1217,9 +1260,9 @@ static void StructRef (ExprDesc* Expr)
     /* Get the symbol table entry and check for a struct/union field */
     strcpy (Ident, CurTok.Ident);
     NextToken ();
-    Field = FindStructField (Expr->Type, Ident);
-    if (Field == 0) {
-        Error ("No field named '%s' found in %s", Ident, GetBasicTypeName (Expr->Type));
+    const SymEntry Field = FindStructField (Expr->Type, Ident);
+    if (Field.Type == 0) {
+        Error ("No field named '%s' found in '%s'", Ident, GetFullTypeName (Expr->Type));
         /* Make the expression an integer at address zero */
         ED_MakeConstAbs (Expr, 0, type_int);
         return;
@@ -1258,16 +1301,19 @@ static void StructRef (ExprDesc* Expr)
         LoadExpr (CF_NONE, Expr);
     }
 
+    /* Clear the tested flag set during loading */
+    ED_MarkAsUntested (Expr);
+
     /* The type is the field type plus any qualifiers from the struct/union */
     if (IsClassStruct (Expr->Type)) {
         Q = GetQualifier (Expr->Type);
     } else {
         Q = GetQualifier (Indirect (Expr->Type));
     }
-    if (GetQualifier (Field->Type) == (GetQualifier (Field->Type) | Q)) {
-        FinalType = Field->Type;
+    if (GetQualifier (Field.Type) == (GetQualifier (Field.Type) | Q)) {
+        FinalType = Field.Type;
     } else {
-        FinalType = TypeDup (Field->Type);
+        FinalType = TypeDup (Field.Type);
         FinalType->C |= Q;
     }
 
@@ -1278,10 +1324,10 @@ static void StructRef (ExprDesc* Expr)
 
         /* Get the size of the type */
         unsigned StructSize = SizeOf (Expr->Type);
-        unsigned FieldSize  = SizeOf (Field->Type);
+        unsigned FieldSize  = SizeOf (Field.Type);
 
         /* Safety check */
-        CHECK (Field->V.Offs + FieldSize <= StructSize);
+        CHECK (Field.V.Offs + FieldSize <= StructSize);
 
         /* The type of the operation depends on the type of the struct/union */
         switch (StructSize) {
@@ -1297,23 +1343,23 @@ static void StructRef (ExprDesc* Expr)
                 Flags = CF_LONG | CF_UNSIGNED | CF_CONST;
                 break;
             default:
-                Internal ("Invalid %s size: %u", GetBasicTypeName (Expr->Type), StructSize);
+                Internal ("Invalid '%s' size: %u", GetFullTypeName (Expr->Type), StructSize);
                 break;
         }
 
         /* Generate a shift to get the field in the proper position in the
         ** primary. For bit fields, mask the value.
         */
-        BitOffs = Field->V.Offs * CHAR_BITS;
-        if (SymIsBitField (Field)) {
-            BitOffs += Field->V.B.BitOffs;
+        BitOffs = Field.V.Offs * CHAR_BITS;
+        if (SymIsBitField (&Field)) {
+            BitOffs += Field.V.B.BitOffs;
             g_asr (Flags, BitOffs);
             /* Mask the value. This is unnecessary if the shift executed above
             ** moved only zeroes into the value.
             */
-            if (BitOffs + Field->V.B.BitWidth != FieldSize * CHAR_BITS) {
+            if (BitOffs + Field.V.B.BitWidth != FieldSize * CHAR_BITS) {
                 g_and (CF_INT | CF_UNSIGNED | CF_CONST,
-                       (0x0001U << Field->V.B.BitWidth) - 1U);
+                       (0x0001U << Field.V.B.BitWidth) - 1U);
             }
         } else {
             g_asr (Flags, BitOffs);
@@ -1325,7 +1371,7 @@ static void StructRef (ExprDesc* Expr)
     } else {
 
         /* Set the struct/union field offset */
-        Expr->IVal += Field->V.Offs;
+        Expr->IVal += Field.V.Offs;
 
         /* Use the new type */
         Expr->Type = FinalType;
@@ -1341,8 +1387,8 @@ static void StructRef (ExprDesc* Expr)
         }
 
         /* Make the expression a bit field if necessary */
-        if (SymIsBitField (Field)) {
-            ED_MakeBitField (Expr, Field->V.B.BitOffs, Field->V.B.BitWidth);
+        if (SymIsBitField (&Field)) {
+            ED_MakeBitField (Expr, Field.V.B.BitOffs, Field.V.B.BitWidth);
         }
     }
 
@@ -1891,7 +1937,7 @@ void hie10 (ExprDesc* Expr)
             if (TypeSpecAhead ()) {
                 Type T[MAXTYPELEN];
                 NextToken ();
-                Size = CheckedSizeOf (ParseType (T));
+                Size = ExprCheckedSizeOf (ParseType (T));
                 ConsumeRParen ();
             } else {
                 /* Remember the output queue pointer */
@@ -1909,7 +1955,7 @@ void hie10 (ExprDesc* Expr)
                         ReleaseLiteral (Expr->LVal);
                     }
                     /* Calculate the size */
-                    Size = CheckedSizeOf (Expr->Type);
+                    Size = ExprCheckedSizeOf (Expr->Type);
                 }
                 /* Remove any generated code */
                 RemoveCode (&Mark);
@@ -2243,7 +2289,8 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
         /* Make sure, the types are compatible */
         if (IsClassInt (Expr->Type)) {
             if (!IsClassInt (Expr2.Type) && !(IsClassPtr(Expr2.Type) && ED_IsNullPtr(Expr))) {
-                Error ("Incompatible types");
+                TypeCompatibilityDiagnostic (Expr->Type, Expr2.Type, 1,
+                    "Incompatible types comparing '%s' with '%s'");
             }
         } else if (IsClassPtr (Expr->Type)) {
             if (IsClassPtr (Expr2.Type)) {
@@ -2254,10 +2301,12 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
                 Type* right = Indirect (Expr2.Type);
                 if (TypeCmp (left, right) < TC_QUAL_DIFF && left->C != T_VOID && right->C != T_VOID) {
                     /* Incompatible pointers */
-                    Error ("Incompatible types");
+                    TypeCompatibilityDiagnostic (Expr->Type, Expr2.Type, 1,
+                        "Incompatible pointer types comparing '%s' with '%s'");
                 }
             } else if (!ED_IsNullPtr (&Expr2)) {
-                Error ("Incompatible types");
+                TypeCompatibilityDiagnostic (Expr->Type, Expr2.Type, 1,
+                    "Comparing pointer type '%s' with '%s'");
             }
         }
 
@@ -3325,7 +3374,8 @@ static void hieQuest (ExprDesc* Expr)
             /* Result type is void */
             ResultType = Expr3.Type;
         } else {
-            Error ("Incompatible types");
+            TypeCompatibilityDiagnostic (Expr2.Type, Expr3.Type, 1,
+                "Incompatible types in ternary '%s' with '%s'");
             ResultType = Expr2.Type;            /* Doesn't matter here */
         }
 
@@ -3361,7 +3411,7 @@ static void opeq (const GenDesc* Gen, ExprDesc* Expr, const char* Op)
 
     /* There must be an integer or pointer on the left side */
     if (!IsClassInt (Expr->Type) && !IsTypePtr (Expr->Type)) {
-        Error ("Invalid left operand type");
+        Error ("Invalid left operand for binary operator '%s'", Op);
         /* Continue. Wrong code will be generated, but the compiler won't
         ** break, so this is the best error recovery.
         */
@@ -3485,7 +3535,7 @@ static void addsubeq (const GenDesc* Gen, ExprDesc *Expr, const char* Op)
 
     /* There must be an integer or pointer on the left side */
     if (!IsClassInt (Expr->Type) && !IsTypePtr (Expr->Type)) {
-        Error ("Invalid left operand type");
+        Error ("Invalid left operand for binary operator '%s'", Op);
         /* Continue. Wrong code will be generated, but the compiler won't
         ** break, so this is the best error recovery.
         */

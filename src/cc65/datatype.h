@@ -203,6 +203,8 @@ extern Type type_double[];
 /* Forward for the SymEntry struct */
 struct SymEntry;
 
+/* Forward for the StrBuf struct */
+struct StrBuf;
 
 
 /*****************************************************************************/
@@ -214,6 +216,18 @@ struct SymEntry;
 const char* GetBasicTypeName (const Type* T);
 /* Return a const name string of the basic type.
 ** Return "type" for unknown basic types.
+*/
+
+const char* GetFullTypeName (const Type* T);
+/* Return the full name string of the given type */
+
+struct StrBuf* GetFullTypeNameBuf (struct StrBuf* S, const Type* T);
+/* Return the full name string of the given type */
+
+int GetQualifierTypeCodeNameBuf (struct StrBuf* S, TypeCode Qual, TypeCode IgnoredQual);
+/* Return the names of the qualifiers of the type.
+** Qualifiers to be ignored can be specified with the IgnoredQual flags.
+** Return the count of added qualifier names.
 */
 
 unsigned TypeLen (const Type* T);
@@ -323,7 +337,15 @@ unsigned CheckedPSizeOf (const Type* T);
 unsigned TypeOf (const Type* T);
 /* Get the code generator base type of the object */
 
+unsigned FuncTypeOf (const Type* T);
+/* Get the code generator flag for calling the function */
+
 Type* Indirect (Type* T);
+/* Do one indirection for the given type, that is, return the type where the
+** given type points to.
+*/
+
+const Type* IndirectConst (const Type* T);
 /* Do one indirection for the given type, that is, return the type where the
 ** given type points to.
 */
@@ -561,6 +583,12 @@ INLINE int IsClassFunc (const Type* T)
 #  define IsClassFunc(T)        (GetClass (T) == T_CLASS_FUNC)
 #endif
 
+int IsClassArithmetic (const Type* T);
+/* Return true if this is an arithmetic type */
+
+int IsCastType (const Type* T);
+/* Return true if this type can be used for casting */
+
 #if defined(HAVE_INLINE)
 INLINE TypeCode GetRawSignedness (const Type* T)
 /* Get the raw signedness of a type */
@@ -744,11 +772,11 @@ Type* GetBaseElementType (Type* T);
 ** the element type that is not an array.
 */
 
-struct SymEntry* GetSymEntry (const Type* T) attribute ((const));
-/* Return a SymEntry pointer from a type */
+struct SymEntry* GetESUSymEntry (const Type* T) attribute ((const));
+/* Return a SymEntry pointer from an enum/struct/union type */
 
-void SetSymEntry (Type* T, struct SymEntry* S);
-/* Set the SymEntry pointer for a type */
+void SetESUSymEntry (Type* T, struct SymEntry* S);
+/* Set the SymEntry pointer for an enum/struct/union type */
 
 Type* IntPromotion (Type* T);
 /* Apply the integer promotions to T and return the result. The returned type

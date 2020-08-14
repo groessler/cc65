@@ -52,13 +52,13 @@
 #include "declare.h"
 #include "error.h"
 #include "funcdesc.h"
+#include "function.h"
 #include "global.h"
+#include "input.h"
 #include "stackptr.h"
 #include "symentry.h"
 #include "typecmp.h"
 #include "symtab.h"
-#include "function.h"
-#include "input.h"
 
 
 
@@ -93,6 +93,7 @@ static SymTable*        TagTab0         = 0;
 static SymTable*        TagTab          = 0;
 static SymTable*        LabelTab        = 0;
 static SymTable*        SPAdjustTab     = 0;
+static SymTable*        FailSafeTab     = 0;    /* For errors */
 
 
 /*****************************************************************************/
@@ -141,7 +142,6 @@ static void FreeSymTable (SymTable* S)
 }
 
 
-
 /*****************************************************************************/
 /*                         Check symbols in a table                          */
 /*****************************************************************************/
@@ -172,7 +172,7 @@ static void CheckSymTable (SymTable* Tab)
                         }
                     } else {
                         if (IS_Get (&WarnUnusedVar)) {
-                            Warning ("'%s' is defined but never used", Entry->Name);
+                            Warning ("Variable '%s' is defined but never used", Entry->Name);
                         }
                     }
                 }
@@ -186,7 +186,7 @@ static void CheckSymTable (SymTable* Tab)
                 } else if (!SymIsRef (Entry)) {
                     /* Defined but not used */
                     if (IS_Get (&WarnUnusedLabel)) {
-                        Warning ("'%s' is defined but never used", Entry->Name);
+                        Warning ("Label '%s' is defined but never used", Entry->Name);
                     }
                 }
             }
@@ -228,6 +228,9 @@ void EnterGlobalLevel (void)
 
     /* Create and assign the table of SP adjustment symbols */
     SPAdjustTab = NewSymTable (SYMTAB_SIZE_GLOBAL);
+
+    /* Create and assign the table of fictitious symbols used with errors */
+    FailSafeTab = NewSymTable (SYMTAB_SIZE_GLOBAL);
 }
 
 
@@ -487,10 +490,15 @@ SymEntry* FindTagSym (const char* Name)
 
 
 
-SymEntry* FindStructField (const Type* T, const char* Name)
-/* Find a struct/union field in the fields list */
+SymEntry FindStructField (const Type* T, const char* Name)
+/* Find a struct/union field in the fields list.
+** Return the info about the found field symbol filled in an entry struct by
+** value, or an empty entry struct if the field is not found.
+*/
 {
-    SymEntry* Field = 0;
+    SymEntry* Entry = 0;
+    SymEntry  Field;
+    int       Offs  = 0;
 
     /* The given type may actually be a pointer to struct/union */
     if (IsTypePtr (T)) {
@@ -501,15 +509,31 @@ SymEntry* FindStructField (const Type* T, const char* Name)
     if (IsClassStruct (T)) {
 
         /* Get a pointer to the struct/union type */
-        const SymEntry* Struct = GetSymEntry (T);
+        const SymEntry* Struct = GetESUSymEntry (T);
         CHECK (Struct != 0);
 
         /* Now search in the struct/union symbol table. Beware: The table may
         ** not exist.
         */
         if (Struct->V.S.SymTab) {
-            Field = FindSymInTable (Struct->V.S.SymTab, Name, HashStr (Name));
+            Entry = FindSymInTable (Struct->V.S.SymTab, Name, HashStr (Name));
+            
+            if (Entry != 0) {
+                Offs = Entry->V.Offs;
+            }
+
+            while (Entry != 0 && (Entry->Flags & SC_ALIAS) == SC_ALIAS) {
+                /* Get the real field */
+                Entry = Entry->V.A.Field;
+            }
         }
+    }
+
+    if (Entry != 0) {
+        Field = *Entry;
+        Field.V.Offs = Offs;
+    } else {
+        memset (&Field, 0, sizeof(SymEntry));
     }
 
     return Field;
@@ -520,6 +544,113 @@ SymEntry* FindStructField (const Type* T, const char* Name)
 /*****************************************************************************/
 /*                       Add stuff to the symbol table                       */
 /*****************************************************************************/
+
+
+
+static int HandleSymRedefinition (SymEntry* Entry, const Type* T, unsigned Flags)
+/* Check and handle redefinition of existing symbols.
+** Complete array sizes and function descriptors as well.
+** Return true if there *is* an error.
+*/
+{
+    /* Get the type info of the existing symbol */
+    Type*    E_Type   = Entry->Type;
+    unsigned E_SCType = Entry->Flags & SC_TYPEMASK;
+    unsigned SCType   = Flags & SC_TYPEMASK;
+
+    /* Existing typedefs cannot be redeclared as anything different */
+    if (E_SCType == SC_TYPEDEF) {
+
+        if (SCType == SC_TYPEDEF) {
+            if (TypeCmp (E_Type, T) < TC_IDENTICAL) {
+                Error ("Conflicting types for typedef '%s'", Entry->Name);
+                Entry = 0;
+            }
+        } else {
+            Error ("Redefinition of typedef '%s' as different kind of symbol", Entry->Name);
+            Entry = 0;
+        }
+
+    } else {
+
+        /* Some symbols may be redeclared if certain requirements are met */
+        if (IsTypeArray (T) && IsTypeArray (E_Type)) {
+
+            /* Get the array sizes */
+            long Size  = GetElementCount (T);
+            long ESize = GetElementCount (E_Type);
+
+            /* If we are handling arrays, the old entry or the new entry may be
+            ** an incomplete declaration. Accept this, and if the exsting entry
+            ** is incomplete, complete it.
+            */
+            if ((Size != UNSPECIFIED && ESize != UNSPECIFIED && Size != ESize) ||
+                TypeCmp (T + 1, E_Type + 1) < TC_EQUAL) {
+                /* Conflicting element types */
+                Error ("Conflicting array types for '%s[]'", Entry->Name);
+                Entry = 0;
+            } else {
+                /* Check if we have a size in the existing definition */
+                if (ESize == UNSPECIFIED) {
+                    /* Existing, size not given, use size from new def */
+                    SetElementCount (E_Type, Size);
+                }
+            }
+
+        } else if ((Entry->Flags & SC_FUNC) == SC_FUNC) {
+
+            /* In case of a function, use the new type descriptor, since it
+            ** contains pointers to the new symbol tables that are needed if
+            ** an actual function definition follows. Be sure not to use the
+            ** new descriptor if it contains a function declaration with an
+            ** empty parameter list.
+            */
+            if (IsTypeFunc (T)) {
+
+                /* New type must be equivalent */
+                if (TypeCmp (E_Type, T) < TC_EQUAL) {
+                    Error ("Conflicting function types for '%s'", Entry->Name);
+                    Entry = 0;
+                } else {
+                    /* Get the function descriptor from the new type */
+                    FuncDesc* F = GetFuncDesc (T);
+                    /* Use this new function descriptor if it doesn't contain
+                    ** an empty parameter list.
+                    */
+                    if ((F->Flags & FD_EMPTY) == 0) {
+                        Entry->V.F.Func = F;
+                        SetFuncDesc (E_Type, F);
+                    }
+                }
+
+            } else {
+                Error ("Redefinition of function '%s' as different kind of symbol", Entry->Name);
+                Entry = 0;
+            }
+
+        } else {
+
+            /* New type must be equivalent */
+            if (SCType != E_SCType) {
+                Error ("Redefinition of '%s' as different kind of symbol", Entry->Name);
+                Entry = 0;
+            } else if (TypeCmp (E_Type, T) < TC_EQUAL) {
+                Error ("Conflicting types for '%s'", Entry->Name);
+                Entry = 0;
+            } else if (E_SCType == SC_ENUMERATOR) {
+                /* Enumerators aren't allowed to be redeclared at all, even if
+                ** all occurences are identical. The current code logic won't
+                ** get here, but let's just do it.
+                */
+                Error ("Redeclaration of enumerator constant '%s'", Entry->Name);
+                Entry = 0;
+            }
+        }
+    }
+
+    /* Return if there are any errors */
+    return Entry == 0;
+}
 
 
 
@@ -554,39 +685,52 @@ static void AddSymEntry (SymTable* T, SymEntry* S)
 SymEntry* AddEnumSym (const char* Name, const Type* Type, SymTable* Tab)
 /* Add an enum entry and return it */
 {
+    SymTable* CurTagTab = TagTab;
+
     /* Do we have an entry with this name already? */
-    SymEntry* Entry = FindSymInTable (TagTab, Name, HashStr (Name));
+    SymEntry* Entry = FindSymInTable (CurTagTab, Name, HashStr (Name));
     if (Entry) {
 
         /* We do have an entry. This may be a forward, so check it. */
         if ((Entry->Flags & SC_TYPEMASK) != SC_ENUM) {
             /* Existing symbol is not an enum */
             Error ("Symbol '%s' is already different kind", Name);
-        } else {
+            Entry = 0;
+        } else if (Type != 0) {
             /* Define the struct size if the underlying type is given. */
-            if (Type != 0) {
-                if (Type !=0 && Entry->V.E.Type != 0) {
-                    /* Both are definitions. */
-                    Error ("Multiple definition for enum '%s'", Name);
-                }
-                Entry->Type       = 0;
+            if (Entry->V.E.Type != 0) {
+                /* Both are definitions. */
+                Error ("Multiple definition for 'enum %s'", Name);
+                Entry = 0;
+            } else {
                 Entry->V.E.SymTab = Tab;
                 Entry->V.E.Type   = Type;
+                Entry->Flags     &= ~SC_DECL;
+                Entry->Flags     |= SC_DEF;
             }
         }
 
-    } else {
+        if (Entry == 0) {
+            /* Use the fail-safe table for fictitious symbols */
+            CurTagTab = FailSafeTab;
+        }
+    }
+    
+    if (Entry == 0) {
 
         /* Create a new entry */
         Entry = NewSymEntry (Name, SC_ENUM);
 
         /* Set the enum type data */
-        Entry->Type       = 0;
         Entry->V.E.SymTab = Tab;
         Entry->V.E.Type   = Type;
 
+        if (Type != 0) {
+            Entry->Flags |= SC_DEF;
+        }
+
         /* Add it to the current table */
-        AddSymEntry (TagTab, Entry);
+        AddSymEntry (CurTagTab, Entry);
     }
 
     /* Return the entry */
@@ -595,44 +739,59 @@ SymEntry* AddEnumSym (const char* Name, const Type* Type, SymTable* Tab)
 
 
 
-SymEntry* AddStructSym (const char* Name, unsigned Type, unsigned Size, SymTable* Tab)
+SymEntry* AddStructSym (const char* Name, unsigned Flags, unsigned Size, SymTable* Tab)
 /* Add a struct/union entry and return it */
 {
+    SymTable* CurTagTab = TagTab;
     SymEntry* Entry;
+    unsigned Type = (Flags & SC_TYPEMASK);
 
     /* Type must be struct or union */
     PRECONDITION (Type == SC_STRUCT || Type == SC_UNION);
 
     /* Do we have an entry with this name already? */
-    Entry = FindSymInTable (TagTab, Name, HashStr (Name));
+    Entry = FindSymInTable (CurTagTab, Name, HashStr (Name));
     if (Entry) {
 
         /* We do have an entry. This may be a forward, so check it. */
         if ((Entry->Flags & SC_TYPEMASK) != Type) {
             /* Existing symbol is not a struct */
             Error ("Symbol '%s' is already different kind", Name);
-        } else if (Size > 0 && Entry->V.S.Size > 0) {
+            Entry = 0;
+        } else if ((Entry->Flags & Flags & SC_DEF) == SC_DEF) {
             /* Both structs are definitions. */
-            Error ("Multiple definition for '%s'", Name);
+            if (Type == SC_STRUCT) {
+                Error ("Multiple definition for 'struct %s'", Name);
+            } else {
+                Error ("Multiple definition for 'union %s'", Name);
+            }
+            Entry = 0;
         } else {
-            /* Define the struct size if it is given */
-            if (Size > 0) {
+            /* Define the struct size if it is a definition */
+            if ((Flags & SC_DEF) == SC_DEF) {
+                Entry->Flags      = Flags;
                 Entry->V.S.SymTab = Tab;
                 Entry->V.S.Size   = Size;
             }
         }
 
-    } else {
+        if (Entry == 0) {
+            /* Use the fail-safe table for fictitious symbols */
+            CurTagTab = FailSafeTab;
+        }
+    }
+    
+    if (Entry == 0) {
 
         /* Create a new entry */
-        Entry = NewSymEntry (Name, Type);
+        Entry = NewSymEntry (Name, Flags);
 
         /* Set the struct data */
         Entry->V.S.SymTab = Tab;
         Entry->V.S.Size   = Size;
 
-        /* Add it to the current table */
-        AddSymEntry (TagTab, Entry);
+        /* Add it to the current tag table */
+        AddSymEntry (CurTagTab, Entry);
     }
 
     /* Return the entry */
@@ -649,7 +808,7 @@ SymEntry* AddBitField (const char* Name, unsigned Offs, unsigned BitOffs, unsign
     if (Entry) {
 
         /* We have a symbol with this name already */
-        Error ("Multiple definition for '%s'", Name);
+        Error ("Multiple definition for bit-field '%s'", Name);
 
     } else {
 
@@ -682,7 +841,7 @@ SymEntry* AddConstSym (const char* Name, const Type* T, unsigned Flags, long Val
         if ((Entry->Flags & SC_CONST) != SC_CONST) {
             Error ("Symbol '%s' is already different kind", Name);
         } else {
-            Error ("Multiple definition for '%s'", Name);
+            Error ("Multiple definition for constant '%s'", Name);
         }
         return Entry;
     }
@@ -704,6 +863,7 @@ SymEntry* AddConstSym (const char* Name, const Type* T, unsigned Flags, long Val
 }
 
 
+
 DefOrRef* AddDefOrRef (SymEntry* E, unsigned Flags)
 /* Add definition or reference to the SymEntry and preserve its attributes */
 {
@@ -721,6 +881,8 @@ DefOrRef* AddDefOrRef (SymEntry* E, unsigned Flags)
     return DOR;
 }
 
+
+
 unsigned short FindSPAdjustment (const char* Name)
 /* Search for an entry in the table of SP adjustments */
 {
@@ -732,6 +894,8 @@ unsigned short FindSPAdjustment (const char* Name)
 
     return Entry->V.SPAdjustment;
 }
+
+
 
 SymEntry* AddLabelSym (const char* Name, unsigned Flags)
 /* Add a goto label to the label table */
@@ -848,21 +1012,42 @@ SymEntry* AddLabelSym (const char* Name, unsigned Flags)
 SymEntry* AddLocalSym (const char* Name, const Type* T, unsigned Flags, int Offs)
 /* Add a local symbol and return the symbol entry */
 {
+    SymTable* Tab = SymTab;
+
     /* Do we have an entry with this name already? */
-    SymEntry* Entry = FindSymInTable (SymTab, Name, HashStr (Name));
+    SymEntry* Entry = FindSymInTable (Tab, Name, HashStr (Name));
     if (Entry) {
 
         /* We have a symbol with this name already */
-        Error ("Multiple definition for '%s'", Name);
+        if (HandleSymRedefinition (Entry, T, Flags)) {
+            Entry = 0;
+        } else if ((Flags & SC_ESUTYPEMASK) != SC_TYPEDEF) {
+            /* Redefinitions are not allowed */
+            if (SymIsDef (Entry) && (Flags & SC_DEF) == SC_DEF) {
+                Error ("Multiple definition of '%s'", Entry->Name);
+                Entry = 0;
+            }
+        }
 
-    } else {
-
+        if (Entry == 0) {
+            /* Use the fail-safe table for fictitious symbols */
+            Tab = FailSafeTab;
+        }
+    }
+    
+    if (Entry == 0) {
         /* Create a new entry */
         Entry = NewSymEntry (Name, Flags);
 
         /* Set the symbol attributes */
         Entry->Type = TypeDup (T);
-        if ((Flags & SC_AUTO) == SC_AUTO || (Flags & SC_TYPEMASK) == SC_TYPEDEF) {
+
+        if ((Flags & SC_STRUCTFIELD) == SC_STRUCTFIELD ||
+            (Flags & SC_ESUTYPEMASK) == SC_TYPEDEF) {
+            if ((Flags & SC_ALIAS) != SC_ALIAS) {
+                Entry->V.Offs = Offs;
+            }
+        } else if ((Flags & SC_AUTO) == SC_AUTO) {
             Entry->V.Offs = Offs;
         } else if ((Flags & SC_REGISTER) == SC_REGISTER) {
             Entry->V.R.RegOffs  = Offs;
@@ -874,14 +1059,12 @@ SymEntry* AddLocalSym (const char* Name, const Type* T, unsigned Flags, int Offs
             /* Generate the assembler name from the label number */
             Entry->V.L.Label = Offs;
             Entry->AsmName = xstrdup (LocalLabelName (Entry->V.L.Label));
-        } else if ((Flags & SC_STRUCTFIELD) == SC_STRUCTFIELD) {
-            Entry->V.Offs = Offs;
         } else {
             Internal ("Invalid flags in AddLocalSym: %04X", Flags);
         }
 
         /* Add the entry to the symbol table */
-        AddSymEntry (SymTab, Entry);
+        AddSymEntry (Tab, Entry);
 
     }
 
@@ -898,101 +1081,46 @@ SymEntry* AddGlobalSym (const char* Name, const Type* T, unsigned Flags)
     int IsFunc = IsTypeFunc (T);
 
     /* Functions must be inserted in the global symbol table */
-    SymTable* Tab = IsFunc? SymTab0 : SymTab;
+    SymTable* Tab = IsFunc ? SymTab0 : SymTab;
 
     /* Do we have an entry with this name already? */
     SymEntry* Entry = FindSymInTable (Tab, Name, HashStr (Name));
     if (Entry) {
-        Type* EType;
-
-        /* If the existing symbol is an enumerated constant,
-        ** then avoid a compiler crash.  See GitHub issue #728.
-        */
-        if (Entry->Flags & SC_ENUMERATOR) {
-            Fatal ("Can't redeclare enumerator constant '%s' as global variable", Name);
-        }
 
         /* We have a symbol with this name already */
-        if (Entry->Flags & SC_TYPEMASK) {
-            Error ("Multiple definition for '%s'", Name);
-            return Entry;
-        }
-
-        /* Get the type string of the existing symbol */
-        EType = Entry->Type;
-
-        /* If we are handling arrays, the old entry or the new entry may be an
-        ** incomplete declaration. Accept this, and if the exsting entry is
-        ** incomplete, complete it.
-        */
-        if (IsTypeArray (T) && IsTypeArray (EType)) {
-
-            /* Get the array sizes */
-            long Size  = GetElementCount (T);
-            long ESize = GetElementCount (EType);
-
-            if ((Size != UNSPECIFIED && ESize != UNSPECIFIED && Size != ESize) ||
-                TypeCmp (T + 1, EType + 1) < TC_EQUAL) {
-                /* Types not identical: Conflicting types */
-                Error ("Conflicting types for '%s'", Name);
-                return Entry;
-            } else {
-                /* Check if we have a size in the existing definition */
-                if (ESize == UNSPECIFIED) {
-                    /* Existing, size not given, use size from new def */
-                    SetElementCount (EType, Size);
-                }
-            }
+        if (HandleSymRedefinition (Entry, T, Flags)) {
+            /* Use the fail-safe table for fictitious symbols */
+            Tab   = FailSafeTab;
+            Entry = 0;
 
         } else {
-            /* New type must be identical */
-            if (TypeCmp (EType, T) < TC_EQUAL) {
-                Error ("Conflicting types for '%s'", Name);
-                return Entry;
-            }
 
-            /* In case of a function, use the new type descriptor, since it
-            ** contains pointers to the new symbol tables that are needed if
-            ** an actual function definition follows. Be sure not to use the
-            ** new descriptor if it contains a function declaration with an
-            ** empty parameter list.
+            /* If a static declaration follows a non-static declaration, then
+            ** warn about the conflict.  (It will compile a public declaration.)
             */
-            if (IsFunc) {
-                /* Get the function descriptor from the new type */
-                FuncDesc* F = GetFuncDesc (T);
-                /* Use this new function descriptor if it doesn't contain
-                ** an empty parameter list.
-                */
-                if ((F->Flags & FD_EMPTY) == 0) {
-                    Entry->V.F.Func = F;
-                    SetFuncDesc (EType, F);
-                }
+            if ((Flags & SC_EXTERN) == 0 && (Entry->Flags & SC_EXTERN) != 0) {
+                Warning ("static declaration follows non-static declaration of '%s'.", Name);
             }
+
+            /* An extern declaration must not change the current linkage. */
+            if (IsFunc || (Flags & (SC_EXTERN | SC_STORAGE)) == SC_EXTERN) {
+                Flags &= ~SC_EXTERN;
+            }
+
+            /* If a public declaration follows a static declaration, then
+            ** warn about the conflict.  (It will compile a public declaration.)
+            */
+            if ((Flags & SC_EXTERN) != 0 && (Entry->Flags & SC_EXTERN) == 0) {
+                Warning ("public declaration follows static declaration of '%s'.", Name);
+            }
+
+            /* Add the new flags */
+            Entry->Flags |= Flags;
         }
 
-        /* If a static declaration follows a non-static declaration, then
-        ** warn about the conflict.  (It will compile a public declaration.)
-        */
-        if ((Flags & SC_EXTERN) == 0 && (Entry->Flags & SC_EXTERN) != 0) {
-            Warning ("static declaration follows non-static declaration of '%s'.", Name);
-        }
-
-        /* An extern declaration must not change the current linkage. */
-        if (IsFunc || (Flags & (SC_EXTERN | SC_STORAGE)) == SC_EXTERN) {
-            Flags &= ~SC_EXTERN;
-        }
-
-        /* If a public declaration follows a static declaration, then
-        ** warn about the conflict.  (It will compile a public declaration.)
-        */
-        if ((Flags & SC_EXTERN) != 0 && (Entry->Flags & SC_EXTERN) == 0) {
-            Warning ("public declaration follows static declaration of '%s'.", Name);
-        }
-
-        /* Add the new flags */
-        Entry->Flags |= Flags;
-
-    } else {
+    } 
+    
+    if (Entry == 0) {
 
         /* Create a new entry */
         Entry = NewSymEntry (Name, Flags);

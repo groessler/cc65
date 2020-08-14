@@ -78,6 +78,144 @@ Type type_double[]      = { TYPE(T_DOUBLE), TYPE(T_END) };
 
 
 
+static struct StrBuf* GetFullTypeNameWestEast (struct StrBuf* West, struct StrBuf* East, const Type* T)
+/* Return the name string of the given type split into a western part and an
+** eastern part.
+*/
+{
+    struct StrBuf Buf = STATIC_STRBUF_INITIALIZER;
+
+    if (IsTypeArray (T)) {
+
+        long Count = GetElementCount (T);
+        if (!SB_IsEmpty (East)) {
+            if (Count > 0) {
+                SB_Printf (&Buf, "[%ld]", Count);
+            } else {
+                SB_Printf (&Buf, "[]");
+            }
+            SB_Append (East, &Buf);
+            SB_Terminate (East);
+
+        } else {
+            if (Count > 0) {
+                SB_Printf (East, "[%ld]", Count);
+            } else {
+                SB_Printf (East, "[]");
+            }
+
+            if (!SB_IsEmpty (West)) {
+                /* Add parentheses to West */
+                SB_Printf (&Buf, "(%s)", SB_GetConstBuf (West));
+                SB_Copy (West, &Buf);
+                SB_Terminate (West);
+            }
+        }
+
+        /* Get element type */
+        GetFullTypeNameWestEast (West, East, T + 1);
+
+    } else if (IsTypeFunc (T)) {
+
+        FuncDesc* F             = GetFuncDesc (T);
+        struct StrBuf ParamList = STATIC_STRBUF_INITIALIZER;
+
+        /* First argument */
+        SymEntry* Param = F->SymTab->SymHead;
+        for (unsigned I = 1; I < F->ParamCount; ++I) {
+            CHECK (Param->NextSym != 0 && (Param->Flags & SC_PARAM) != 0);
+            SB_AppendStr (&ParamList, SB_GetConstBuf (GetFullTypeNameBuf (&Buf, Param->Type)));
+            SB_AppendStr (&ParamList, ", ");
+            SB_Clear (&Buf);
+            /* Next argument */
+            Param = Param->NextSym;
+        }
+        if ((F->Flags & FD_VARIADIC) == 0) {
+            if (F->ParamCount > 0) {
+                SB_AppendStr (&ParamList, SB_GetConstBuf (GetFullTypeNameBuf (&Buf, Param->Type)));
+            } else if ((F->Flags & FD_EMPTY) == 0) {
+                SB_AppendStr (&ParamList, "void");
+            }
+        } else {
+            if (F->ParamCount > 0) {
+                SB_AppendStr (&ParamList, SB_GetConstBuf (GetFullTypeNameBuf (&Buf, Param->Type)));
+                SB_AppendStr (&ParamList, ", ...");
+            } else {
+                SB_AppendStr (&ParamList, "...");
+            }
+        }
+        SB_Terminate (&ParamList);
+
+        /* Join the existing West and East together */
+        if (!SB_IsEmpty (East)) {
+            SB_Append (West, East);
+            SB_Terminate (West);
+            SB_Clear (East);
+        }
+
+        if (SB_IsEmpty (West)) {
+            /* Just use the param list */
+            SB_Printf (West, "(%s)", SB_GetConstBuf (&ParamList));
+        } else {
+            /* Append the param list to the existing West */
+            SB_Printf (&Buf, "(%s)(%s)", SB_GetConstBuf (West), SB_GetConstBuf (&ParamList));
+            SB_Printf (West, "%s", SB_GetConstBuf (&Buf));
+        }
+        SB_Done (&ParamList);
+
+        /* Return type */
+        GetFullTypeNameWestEast (West, East, T + 1);
+
+    } else if (IsTypePtr (T)) {
+
+        int QualCount = 0;
+
+        SB_Printf (&Buf, "*");
+
+        /* Add qualifiers */
+        if ((GetQualifier (T) & ~T_QUAL_NEAR) != T_QUAL_NONE) {
+            QualCount = GetQualifierTypeCodeNameBuf (&Buf, T->C, T_QUAL_NEAR);
+        }
+
+        if (!SB_IsEmpty (West)) {
+            if (QualCount > 0) {
+                SB_AppendChar (&Buf, ' ');
+            }
+            SB_Append (&Buf, West);
+        }
+
+        SB_Copy (West, &Buf);
+        SB_Terminate (West);
+
+        /* Get indirection type */
+        GetFullTypeNameWestEast (West, East, T + 1);
+
+    } else {
+
+        /* Add qualifiers */
+        if ((GetQualifier (T) & ~T_QUAL_NEAR) != 0) {
+            if (GetQualifierTypeCodeNameBuf (&Buf, T->C, T_QUAL_NEAR) > 0) {
+                SB_AppendChar (&Buf, ' ');
+            }
+        }
+
+        SB_AppendStr (&Buf, GetSymTypeName (T));
+
+        if (!SB_IsEmpty (West)) {
+            SB_AppendChar (&Buf, ' ');
+            SB_Append (&Buf, West);
+        }
+
+        SB_Copy (West, &Buf);
+        SB_Terminate (West);
+    }
+
+    SB_Done (&Buf);
+    return West;
+}
+
+
+
 const char* GetBasicTypeName (const Type* T)
 /* Return a const name string of the basic type.
 ** Return "type" for unknown basic types.
@@ -130,6 +268,98 @@ const char* GetBasicTypeName (const Type* T)
         }
     }
     return "type";
+}
+
+
+
+const char* GetFullTypeName (const Type* T)
+/* Return the full name string of the given type */
+{
+    struct StrBuf* Buf = NewDiagnosticStrBuf ();
+    GetFullTypeNameBuf (Buf, T);
+
+    return SB_GetConstBuf (Buf);
+}
+
+
+
+struct StrBuf* GetFullTypeNameBuf (struct StrBuf* S, const Type* T)
+/* Return the full name string of the given type */
+{
+    struct StrBuf East = STATIC_STRBUF_INITIALIZER;
+    GetFullTypeNameWestEast (S, &East, T);
+
+    /* Join West and East */
+    SB_Append (S, &East);
+    SB_Terminate (S);
+    SB_Done (&East);
+
+    return S;
+}
+
+
+
+int GetQualifierTypeCodeNameBuf (struct StrBuf* S, TypeCode Qual, TypeCode IgnoredQual)
+/* Return the names of the qualifiers of the type.
+** Qualifiers to be ignored can be specified with the IgnoredQual flags.
+** Return the count of added qualifier names.
+*/
+{
+    int Count = 0;
+
+    Qual &= T_MASK_QUAL & ~IgnoredQual;
+    if (Qual & T_QUAL_CONST) {
+        if (!SB_IsEmpty (S)) {
+            SB_AppendChar (S, ' ');
+        }
+        SB_AppendStr (S, "const");
+        ++Count;
+    }
+    if (Qual & T_QUAL_VOLATILE) {
+        if (Count > 0) {
+            SB_AppendChar (S, ' ');
+        }
+        SB_AppendStr (S, "volatile");
+        ++Count;
+    }
+    if (Qual & T_QUAL_RESTRICT) {
+        if (Count > 0) {
+            SB_AppendChar (S, ' ');
+        }
+        SB_AppendStr (S, "restrict");
+        ++Count;
+    }
+    if (Qual & T_QUAL_NEAR) {
+        if (Count > 0) {
+            SB_AppendChar (S, ' ');
+        }
+        SB_AppendStr (S, "__near__");
+        ++Count;
+    }
+    if (Qual & T_QUAL_FAR) {
+        SB_AppendStr (S, "__far__");
+        ++Count;
+    }
+    if (Qual & T_QUAL_FASTCALL) {
+        if (Count > 0) {
+            SB_AppendChar (S, ' ');
+        }
+        SB_AppendStr (S, "__fastcall__");
+        ++Count;
+    }
+    if (Qual & T_QUAL_CDECL) {
+        if (Count > 0) {
+            SB_AppendChar (S, ' ');
+        }
+        SB_AppendStr (S, "__cdecl__");
+        ++Count;
+    }
+
+    if (Count > 0) {
+        SB_Terminate (S);
+    }
+
+    return Count;
 }
 
 
@@ -673,7 +903,7 @@ unsigned CheckedSizeOf (const Type* T)
 {
     unsigned Size = SizeOf (T);
     if (Size == 0) {
-        Error ("Size of data type is unknown");
+        Error ("Size of type '%s' is unknown", GetFullTypeName (T));
         Size = SIZEOF_CHAR;     /* Don't return zero */
     }
     return Size;
@@ -689,7 +919,7 @@ unsigned CheckedPSizeOf (const Type* T)
 {
     unsigned Size = PSizeOf (T);
     if (Size == 0) {
-        Error ("Size of data type is unknown");
+        Error ("Size of type '%s' is unknown", GetFullTypeName (T + 1));
         Size = SIZEOF_CHAR;     /* Don't return zero */
     }
     return Size;
@@ -732,7 +962,8 @@ unsigned TypeOf (const Type* T)
             return CF_FLOAT;
 
         case T_FUNC:
-            return (((FuncDesc*) T->A.P)->Flags & FD_VARIADIC)? 0 : CF_FIXARGC;
+            /* Treat this as a function pointer */
+            return CF_INT | CF_UNSIGNED;
 
         case T_STRUCT:
         case T_UNION:
@@ -743,9 +974,27 @@ unsigned TypeOf (const Type* T)
             /* Address of ... */
             return CF_INT | CF_UNSIGNED;
 
+        case T_ENUM:
+            /* Incomplete enum type */
+            Error ("Incomplete type '%s'", GetFullTypeName (T));
+            return CF_INT;
+
         default:
             Error ("Illegal type %04lX", T->C);
             return CF_INT;
+    }
+}
+
+
+
+unsigned FuncTypeOf (const Type* T)
+/* Get the code generator flag for calling the function */
+{
+    if (GetUnderlyingTypeCode (T) == T_FUNC) {
+        return (((FuncDesc*) T->A.P)->Flags & FD_VARIADIC) ? 0 : CF_FIXARGC;
+    } else {
+        Error ("Illegal function type %04lX", T->C);
+        return 0;
     }
 }
 
@@ -765,11 +1014,41 @@ Type* Indirect (Type* T)
 
 
 
+const Type* IndirectConst (const Type* T)
+/* Do one indirection for the given type, that is, return the type where the
+** given type points to.
+*/
+{
+    /* We are expecting a pointer expression */
+    CHECK (IsClassPtr (T));
+
+    /* Skip the pointer or array token itself */
+    return T + 1;
+}
+
+
+
 Type* ArrayToPtr (Type* T)
 /* Convert an array to a pointer to it's first element */
 {
     /* Return pointer to first element */
     return PointerTo (GetElementType (T));
+}
+
+
+
+int IsClassArithmetic (const Type* T)
+/* Return true if this is an arithmetic type */
+{
+    return IsClassInt (T) || IsClassFloat (T);
+}
+
+
+
+int IsCastType (const Type* T)
+/* Return true if this type can be used for casting */
+{
+    return IsClassArithmetic (T) || IsClassPtr (T) || IsTypeVoid (T);
 }
 
 
@@ -881,8 +1160,8 @@ Type* GetBaseElementType (Type* T)
 
 
 
-SymEntry* GetSymEntry (const Type* T)
-/* Return a SymEntry pointer from a type */
+SymEntry* GetESUSymEntry (const Type* T)
+/* Return a SymEntry pointer from an enum/struct/union type */
 {
     /* Only enums, structs or unions have a SymEntry attribute */
     CHECK (IsClassStruct (T) || IsTypeEnum (T));
@@ -893,8 +1172,8 @@ SymEntry* GetSymEntry (const Type* T)
 
 
 
-void SetSymEntry (Type* T, SymEntry* S)
-/* Set the SymEntry pointer for a type */
+void SetESUSymEntry (Type* T, SymEntry* S)
+/* Set the SymEntry pointer for an enum/struct/union type */
 {
     /* Only enums, structs or unions have a SymEntry attribute */
     CHECK (IsClassStruct (T) || IsTypeEnum (T));

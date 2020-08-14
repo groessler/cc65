@@ -487,7 +487,7 @@ void NewFunc (SymEntry* Func)
     }
 
     /* Generate function entry code if needed */
-    g_enter (TypeOf (Func->Type), F_GetParamSize (CurrentFunc));
+    g_enter (FuncTypeOf (Func->Type), F_GetParamSize (CurrentFunc));
 
     /* If stack checking code is requested, emit a call to the helper routine */
     if (IS_Get (&CheckStack)) {
@@ -513,7 +513,7 @@ void NewFunc (SymEntry* Func)
             ** We don't currently support this case.
             */
             if (RType == Param->Type) {
-                Error ("Passing %s of this size by value is not supported", GetBasicTypeName (Param->Type));
+                Error ("Passing '%s' of this size by value is not supported", GetFullTypeName (Param->Type));
             }
         }
 

@@ -33,6 +33,8 @@
 
 
 
+#include <limits.h>
+
 /* cc65 */
 #include "codegen.h"
 #include "error.h"
@@ -113,14 +115,46 @@ void LoadExpr (unsigned Flags, struct ExprDesc* Expr)
         ** field is completely contained in the lower byte, we will throw away
         ** the high byte anyway and may therefore load just the low byte.
         */
+        unsigned EndBit = 0;  /* End bit for bit-fields, or zero if non-bit-field. */
+        int AdjustBitField = 0;
+        unsigned BitFieldFullWidthFlags = 0;
         if (ED_IsBitField (Expr)) {
-            Flags |= (Expr->BitOffs + Expr->BitWidth <= CHAR_BITS) ? CF_CHAR : CF_INT;
+            EndBit = Expr->BitOffs + Expr->BitWidth;
+            AdjustBitField = Expr->BitOffs != 0 || (EndBit != CHAR_BITS && EndBit != INT_BITS);
+
+            /* TODO: This probably needs to be guarded by AdjustBitField when long bit-fields are
+            ** supported.
+            */
+            Flags |= (EndBit <= CHAR_BITS) ? CF_CHAR : CF_INT;
             Flags |= CF_UNSIGNED;
+
+            /* Flags we need operate on the whole bit-field, without CF_FORCECHAR.  */
+            BitFieldFullWidthFlags = Flags;
+
+            /* If we're adjusting, then only load a char (not an int) and do only char ops;
+            ** We will clear the high byte in the adjustment.  CF_FORCECHAR does nothing if the
+            ** type is not CF_CHAR.
+            */
+            if (AdjustBitField) {
+                Flags |= CF_FORCECHAR;
+            }
         } else if ((Flags & CF_TYPEMASK) == 0) {
             Flags |= TypeOf (Expr->Type);
         }
+
         if (ED_NeedsTest (Expr)) {
-            Flags |= CF_TEST;
+            /* If we're only testing, we do not need to promote char to int.
+            ** CF_FORCECHAR does nothing if the type is not CF_CHAR.
+            */
+            Flags |= CF_FORCECHAR;
+
+            /* Setting CF_TEST will cause the load to perform optimizations and not actually load
+            ** all bits of the bit-field, instead just computing the condition codes.  Therefore,
+            ** if adjustment is required, we do not set CF_TEST here, but handle it below.
+            */
+            if (!AdjustBitField) {
+                Flags |= CF_TEST;
+            }
         }
 
         /* Load the content of Expr */
@@ -188,18 +222,54 @@ void LoadExpr (unsigned Flags, struct ExprDesc* Expr)
                 Internal ("Invalid location in LoadExpr: 0x%04X", ED_GetLoc (Expr));
         }
 
-        /* Handle bit fields. The actual type may have been casted or
-        ** converted, so be sure to always use unsigned ints for the
-        ** operations.
+        /* Handle bit fields if necessary. The actual type may have been casted or converted,
+        ** so be sure to always use unsigned ints for the operations.
         */
-        if (ED_IsBitField (Expr)) {
-            unsigned F = CF_INT | CF_UNSIGNED | CF_CONST | (Flags & CF_TEST);
-            /* Shift right by the bit offset */
-            g_asr (F, Expr->BitOffs);
-            /* And by the width if the field doesn't end on an int boundary */
-            if (Expr->BitOffs + Expr->BitWidth != CHAR_BITS &&
-                Expr->BitOffs + Expr->BitWidth != INT_BITS) {
-                g_and (F, (0x0001U << Expr->BitWidth) - 1U);
+        if (AdjustBitField) {
+            unsigned F = Flags | CF_CONST;
+
+            /* We always need to do something with the low byte, so there is no opportunity
+            ** for optimization by skipping it.
+            */
+            CHECK (Expr->BitOffs < CHAR_BITS);
+
+            if (ED_NeedsTest (Expr)) {
+                /* If we need to do a test, then we avoid shifting (ASR only shifts one bit
+                ** at a time, so is slow) and just AND with the appropriate mask, then test
+                ** the result of that.
+                */
+
+                /* Avoid overly large shift on host platform. */
+                if (EndBit == sizeof (unsigned long) * CHAR_BIT) {
+                    g_and (F, (~0UL << Expr->BitOffs));
+                } else {
+                    g_and (F, ((1UL << EndBit) - 1) & (~0UL << Expr->BitOffs));
+                }
+
+                /* TODO: When long bit-fields are supported, an optimization to test only 3 bytes
+                ** when EndBit <= 24 is possible.
+                */
+                g_test (F);
+            } else {
+                /* Shift right by the bit offset; no code is emitted if BitOffs is zero */
+                g_asr (F, Expr->BitOffs);
+
+                /* Since we have now shifted down, we could do char ops when the width fits in
+                ** a char, but we also need to clear the high byte since we've been using
+                ** CF_FORCECHAR up to now.
+                */
+
+                /* And by the width if the field doesn't end on a char or int boundary.
+                ** If it does end on a boundary, then zeros have already been shifted in,
+                ** but we need to clear the high byte for char.  g_and emits no code if the mask
+                ** is all ones.
+                */
+                if (EndBit == CHAR_BITS) {
+                    /* We need to clear the high byte, since CF_FORCECHAR was set. */
+                    g_and (BitFieldFullWidthFlags | CF_CONST, 0xFF);
+                } else if (EndBit != INT_BITS) {
+                    g_and (BitFieldFullWidthFlags | CF_CONST, (0x0001U << Expr->BitWidth) - 1U);
+                }
             }
         }
 

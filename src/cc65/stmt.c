@@ -333,7 +333,7 @@ static void ReturnStatement (void)
                 /* Handle struct/union specially */
                 ReturnType = GetStructReplacementType (Expr.Type);
                 if (ReturnType == Expr.Type) {
-                    Error ("Returning %s of this size by value is not supported", GetBasicTypeName (Expr.Type));
+                    Error ("Returning '%s' of this size by value is not supported", GetFullTypeName (Expr.Type));
                 }
                 LoadExpr (TypeOf (ReturnType), &Expr);
 
@@ -581,6 +581,7 @@ int Statement (int* PendingToken)
     ExprDesc Expr;
     int GotBreak;
     CodeMark Start, End;
+    unsigned PrevErrorCount = ErrorCount;
 
     /* Assume no pending token */
     if (PendingToken) {
@@ -681,7 +682,8 @@ int Statement (int* PendingToken)
             GetCodePos (&End);
             if (CodeRangeIsEmpty (&Start, &End) &&
                 !IsTypeVoid (Expr.Type)         &&
-                IS_Get (&WarnNoEffect)) {
+                IS_Get (&WarnNoEffect)          &&
+                PrevErrorCount == ErrorCount) {
                 Warning ("Statement has no effect");
             }
             CheckSemi (PendingToken);

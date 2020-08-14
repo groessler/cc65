@@ -1,15 +1,12 @@
 /*****************************************************************************/
 /*                                                                           */
-/*                                typeconv.h                                 */
+/*                               staticassert.h                              */
 /*                                                                           */
-/*                          Handle type conversions                          */
+/*          _Static_assert handling for the cc65 C compiler                  */
 /*                                                                           */
 /*                                                                           */
 /*                                                                           */
-/* (C) 2002-2008 Ullrich von Bassewitz                                       */
-/*               Roemerstrasse 52                                            */
-/*               D-70794 Filderstadt                                         */
-/* EMail:        uz@cc65.org                                                 */
+/* Copyright 2020 The cc65 Authors                                           */
 /*                                                                           */
 /*                                                                           */
 /* This software is provided 'as-is', without any expressed or implied       */
@@ -33,13 +30,8 @@
 
 
 
-#ifndef TYPECONV_H
-#define TYPECONV_H
-
-
-
-/* cc65 */
-#include "exprdesc.h"
+#ifndef STATICASSERT_H
+#define STATICASSERT_H
 
 
 
@@ -49,20 +41,11 @@
 
 
 
-void TypeCompatibilityDiagnostic (const Type* NewType, const Type* OldType, int IsError, const char* Msg);
-/* Print error or warning message about type conversion with proper type names */
-
-void TypeConversion (ExprDesc* Expr, const Type* NewType);
-/* Do an automatic conversion of the given expression to the new type. Output
-** warnings or errors where this automatic conversion is suspicious or
-** impossible.
-*/
-
-void TypeCast (ExprDesc* Expr);
-/* Handle an explicit cast. */
+void ParseStaticAssert (void);
+/* Handle _Static_assert. These are a C11 feature. */
 
 
 
-/* End of typeconv.h */
+/* End of staticassert.h */
 
 #endif
