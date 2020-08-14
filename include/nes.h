@@ -168,8 +168,8 @@ struct __apu {
 #define JOYPAD          ((unsigned char volatile[2])0x4016)
 
 /* The addresses of the static drivers */
-extern void nes_stdjoy_joy[];       /* Referred to by joy_static_stddrv[] */
-extern void nes_64_56_2_tgi[];      /* Referred to by tgi_static_stddrv[] */
+extern unsigned char nes_stdjoy_joy[];       /* Referred to by joy_static_stddrv[] */
+extern unsigned char nes_64_56_2_tgi[];      /* Referred to by tgi_static_stddrv[] */
 
 
 

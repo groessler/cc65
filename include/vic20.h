@@ -127,8 +127,8 @@
 
 
 /* The addresses of the static drivers */
-extern void vic20_ptvjoy_joy[];
-extern void vic20_stdjoy_joy[];         /* Referred to by joy_static_stddrv[] */
+extern unsigned char vic20_ptvjoy_joy[];
+extern unsigned char vic20_stdjoy_joy[];         /* Referred to by joy_static_stddrv[] */
 
 extern void vic20_rama_emd[];
 extern void vic20_georam_emd[];
