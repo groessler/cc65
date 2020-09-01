@@ -117,7 +117,7 @@ enum {
     T_MASK_QUAL     = 0x07F000,
 
     /* Types */
-    T_CHAR      = T_TYPE_CHAR     | T_CLASS_INT    | T_SIGN_UNSIGNED | T_SIZE_CHAR,
+    T_CHAR      = T_TYPE_CHAR     | T_CLASS_INT    | T_SIGN_NONE     | T_SIZE_CHAR,
     T_SCHAR     = T_TYPE_CHAR     | T_CLASS_INT    | T_SIGN_SIGNED   | T_SIZE_CHAR,
     T_UCHAR     = T_TYPE_CHAR     | T_CLASS_INT    | T_SIGN_UNSIGNED | T_SIZE_CHAR,
     T_SHORT     = T_TYPE_SHORT    | T_CLASS_INT    | T_SIGN_SIGNED   | T_SIZE_SHORT,
@@ -189,12 +189,14 @@ struct Type {
 #define PTR_BITS        (8 * SIZEOF_PTR)
 
 /* Predefined type strings */
+extern Type type_char[];
 extern Type type_schar[];
 extern Type type_uchar[];
 extern Type type_int[];
 extern Type type_uint[];
 extern Type type_long[];
 extern Type type_ulong[];
+extern Type type_bool[];
 extern Type type_void[];
 extern Type type_size_t[];
 extern Type type_float[];
@@ -250,9 +252,6 @@ void TypeFree (Type* T);
 int SignExtendChar (int C);
 /* Do correct sign extension of a character */
 
-TypeCode GetDefaultChar (void);
-/* Return the default char type (signed/unsigned) depending on the settings */
-
 Type* GetCharArrayType (unsigned Len);
 /* Return the type for a char array of the given length */
 
@@ -278,13 +277,13 @@ Type* PointerTo (const Type* T);
 */
 
 void PrintType (FILE* F, const Type* T);
-/* Output translation of type array. */
-
-void PrintRawType (FILE* F, const Type* T);
-/* Print a type string in raw format (for debugging) */
+/* Print fulle name of the type */
 
 void PrintFuncSig (FILE* F, const char* Name, Type* T);
-/* Print a function signature. */
+/* Print a function signature */
+
+void PrintRawType (FILE* F, const Type* T);
+/* Print a type string in raw hex format (for debugging) */
 
 int TypeHasAttr (const Type* T);
 /* Return true if the given type has attribute data */
@@ -365,12 +364,22 @@ INLINE TypeCode GetRawType (const Type* T)
 
 #if defined(HAVE_INLINE)
 INLINE int IsTypeChar (const Type* T)
-/* Return true if this is a character type */
+/* Return true if this is a char type */
 {
     return (GetRawType (GetUnderlyingType (T)) == T_TYPE_CHAR);
 }
 #else
 #  define IsTypeChar(T)         (GetRawType (GetUnderlyingType (T)) == T_TYPE_CHAR)
+#endif
+
+#if defined(HAVE_INLINE)
+INLINE int IsTypeShort (const Type* T)
+/* Return true if this is a short type (signed or unsigned) */
+{
+    return (GetRawType (GetUnderlyingType (T)) == T_TYPE_SHORT);
+}
+#else
+#  define IsTypeShort(T)         (GetRawType (GetUnderlyingType (T)) == T_TYPE_SHORT)
 #endif
 
 #if defined(HAVE_INLINE)
@@ -385,7 +394,7 @@ INLINE int IsTypeInt (const Type* T)
 
 #if defined(HAVE_INLINE)
 INLINE int IsTypeLong (const Type* T)
-/* Return true if this is a long type (signed or unsigned) */
+/* Return true if this is a long int type (signed or unsigned) */
 {
     return (GetRawType (GetUnderlyingType (T)) == T_TYPE_LONG);
 }
@@ -394,8 +403,30 @@ INLINE int IsTypeLong (const Type* T)
 #endif
 
 #if defined(HAVE_INLINE)
+INLINE int IsISOChar (const Type* T)
+/* Return true if this is a narrow character type (without signed/unsigned) */
+{
+    return (UnqualifiedType (T->C) == T_CHAR);
+}
+#else
+#  define IsISOChar(T)          (UnqualifiedType ((T)->C) == T_CHAR)
+#endif
+
+#if defined(HAVE_INLINE)
+INLINE int IsClassChar (const Type* T)
+/* Return true if this is a narrow character type (including signed/unsigned).
+** For now this is the same as IsRawTypeChar(T).
+*/
+{
+    return (GetRawType (T) == T_TYPE_CHAR);
+}
+#else
+#  define IsClassChar(T)        (GetRawType (T) == T_TYPE_CHAR)
+#endif
+
+#if defined(HAVE_INLINE)
 INLINE int IsRawTypeChar (const Type* T)
-/* Return true if this is a character raw type */
+/* Return true if this is a char raw type (including signed/unsigned) */
 {
     return (GetRawType (T) == T_TYPE_CHAR);
 }
@@ -583,11 +614,44 @@ INLINE int IsClassFunc (const Type* T)
 #  define IsClassFunc(T)        (GetClass (T) == T_CLASS_FUNC)
 #endif
 
+int IsClassObject (const Type* T);
+/* Return true if this is a fully described object type */
+
+int IsClassIncomplete (const Type* T);
+/* Return true if this is an object type lacking size info */
+
 int IsClassArithmetic (const Type* T);
-/* Return true if this is an arithmetic type */
+/* Return true if this is an integer or real floating type */
+
+int IsClassBasic (const Type* T);
+/* Return true if this is a char, integer or floating type */
+
+int IsClassScalar (const Type* T);
+/* Return true if this is an arithmetic or pointer type */
+
+int IsClassDerived (const Type* T);
+/* Return true if this is an array, struct, union, function or pointer type */
+
+int IsClassAggregate (const Type* T);
+/* Return true if this is an array or struct type */
+
+int IsRelationType (const Type* T);
+/* Return true if this is an arithmetic, array or pointer type */
 
 int IsCastType (const Type* T);
 /* Return true if this type can be used for casting */
+
+int IsESUType (const Type* T);
+/* Return true if this is an enum/struct/union type */
+
+int IsIncompleteESUType (const Type* T);
+/* Return true if this is an incomplete ESU type */
+
+int IsEmptiableObjectType (const Type* T);
+/* Return true if this is a struct/union/void type that can have zero size */
+
+int HasUnknownSize (const Type* T);
+/* Return true if this is an incomplete ESU type or an array of unknown size */
 
 #if defined(HAVE_INLINE)
 INLINE TypeCode GetRawSignedness (const Type* T)
@@ -610,6 +674,16 @@ INLINE TypeCode GetSignedness (const Type* T)
 #endif
 
 #if defined(HAVE_INLINE)
+INLINE int IsRawSignUnsigned (const Type* T)
+/* Return true if this is an unsigned raw type */
+{
+    return (GetRawSignedness (T) == T_SIGN_UNSIGNED);
+}
+#else
+#  define IsRawSignUnsigned(T)  (GetRawSignedness (T) == T_SIGN_UNSIGNED)
+#endif
+
+#if defined(HAVE_INLINE)
 INLINE int IsSignUnsigned (const Type* T)
 /* Return true if this is an unsigned type */
 {
@@ -617,6 +691,16 @@ INLINE int IsSignUnsigned (const Type* T)
 }
 #else
 #  define IsSignUnsigned(T)     (GetSignedness (T) == T_SIGN_UNSIGNED)
+#endif
+
+#if defined(HAVE_INLINE)
+INLINE int IsRawSignSigned (const Type* T)
+/* Return true if this is a signed raw type */
+{
+    return (GetRawSignedness (T) == T_SIGN_SIGNED);
+}
+#else
+#  define IsRawSignSigned(T)    (GetRawSignedness (T) == T_SIGN_SIGNED)
 #endif
 
 #if defined(HAVE_INLINE)
@@ -630,7 +714,7 @@ INLINE int IsSignSigned (const Type* T)
 #endif
 
 #if defined(HAVE_INLINE)
-INLINE TypeCode GetRawSizeModifier(const Type* T)
+INLINE TypeCode GetRawSizeModifier (const Type* T)
 /* Get the size modifier of a raw type */
 {
     return (T->C & T_MASK_SIZE);
@@ -752,6 +836,9 @@ void SetFuncDesc (Type* T, FuncDesc* F);
 
 Type* GetFuncReturn (Type* T) attribute ((const));
 /* Return a pointer to the return type of a function or pointer-to-function type */
+
+FuncDesc* GetFuncDefinitionDesc (struct Type* T);
+/* Get the function descriptor of the function definition */
 
 long GetElementCount (const Type* T);
 /* Get the element count of the array specified in T (which must be of

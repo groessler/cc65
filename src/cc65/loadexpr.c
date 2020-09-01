@@ -33,8 +33,6 @@
 
 
 
-#include <limits.h>
-
 /* cc65 */
 #include "codegen.h"
 #include "error.h"
@@ -66,9 +64,13 @@ static void LoadAddress (unsigned Flags, ExprDesc* Expr)
             break;
 
         case E_LOC_STATIC:
-        case E_LOC_LITERAL:
-            /* Static symbol or literal, load address */
+            /* Static symbol, load address */
             g_getimmed ((Flags | CF_STATIC) & ~CF_CONST, Expr->Name, Expr->IVal);
+            break;
+
+        case E_LOC_LITERAL:
+            /* Literal, load address */
+            g_getimmed ((Flags | CF_LITERAL) & ~CF_CONST, Expr->Name, Expr->IVal);
             break;
 
         case E_LOC_REGISTER:
@@ -79,6 +81,11 @@ static void LoadAddress (unsigned Flags, ExprDesc* Expr)
                 Error ("Cannot take the address of a register variable");
             }
             g_getimmed ((Flags | CF_REGVAR) & ~CF_CONST, Expr->Name, Expr->IVal);
+            break;
+
+        case E_LOC_CODE:
+            /* Code label, load address */
+            g_getimmed ((Flags | CF_CODE) & ~CF_CONST, Expr->Name, Expr->IVal);
             break;
 
         case E_LOC_STACK:
@@ -115,18 +122,19 @@ void LoadExpr (unsigned Flags, struct ExprDesc* Expr)
         ** field is completely contained in the lower byte, we will throw away
         ** the high byte anyway and may therefore load just the low byte.
         */
-        unsigned EndBit = 0;  /* End bit for bit-fields, or zero if non-bit-field. */
         int AdjustBitField = 0;
         unsigned BitFieldFullWidthFlags = 0;
         if (ED_IsBitField (Expr)) {
-            EndBit = Expr->BitOffs + Expr->BitWidth;
+            unsigned EndBit = Expr->BitOffs + Expr->BitWidth;
             AdjustBitField = Expr->BitOffs != 0 || (EndBit != CHAR_BITS && EndBit != INT_BITS);
 
             /* TODO: This probably needs to be guarded by AdjustBitField when long bit-fields are
             ** supported.
             */
             Flags |= (EndBit <= CHAR_BITS) ? CF_CHAR : CF_INT;
-            Flags |= CF_UNSIGNED;
+            if (IsSignUnsigned (Expr->Type)) {
+                Flags |= CF_UNSIGNED;
+            }
 
             /* Flags we need operate on the whole bit-field, without CF_FORCECHAR.  */
             BitFieldFullWidthFlags = Flags;
@@ -136,13 +144,21 @@ void LoadExpr (unsigned Flags, struct ExprDesc* Expr)
             ** type is not CF_CHAR.
             */
             if (AdjustBitField) {
-                Flags |= CF_FORCECHAR;
+                /* If adjusting, then we're sign extending manually, so do everything unsigned
+                ** to make shifts faster.
+                */
+                Flags |= CF_UNSIGNED | CF_FORCECHAR;
+                BitFieldFullWidthFlags |= CF_UNSIGNED;
             }
         } else if ((Flags & CF_TYPEMASK) == 0) {
+            /* If Expr is an incomplete ESY type, bail out */
+            if (IsIncompleteESUType (Expr->Type)) {
+                return;
+            }
             Flags |= TypeOf (Expr->Type);
         }
 
-        if (ED_NeedsTest (Expr)) {
+        if (ED_YetToTest (Expr)) {
             /* If we're only testing, we do not need to promote char to int.
             ** CF_FORCECHAR does nothing if the type is not CF_CHAR.
             */
@@ -176,14 +192,23 @@ void LoadExpr (unsigned Flags, struct ExprDesc* Expr)
                 break;
 
             case E_LOC_STATIC:
-            case E_LOC_LITERAL:
-                /* Static variable or literal in the literal pool */
+                /* Static variable */
                 g_getstatic (Flags | CF_STATIC, Expr->Name, Expr->IVal);
+                break;
+
+            case E_LOC_LITERAL:
+                /* Literal in the literal pool */
+                g_getstatic (Flags | CF_LITERAL, Expr->Name, Expr->IVal);
                 break;
 
             case E_LOC_REGISTER:
                 /* Register variable */
                 g_getstatic (Flags | CF_REGVAR, Expr->Name, Expr->IVal);
+                break;
+
+            case E_LOC_CODE:
+                /* Code label location */
+                g_getstatic (Flags | CF_CODE, Expr->Name, Expr->IVal);
                 break;
 
             case E_LOC_STACK:
@@ -226,50 +251,16 @@ void LoadExpr (unsigned Flags, struct ExprDesc* Expr)
         ** so be sure to always use unsigned ints for the operations.
         */
         if (AdjustBitField) {
-            unsigned F = Flags | CF_CONST;
-
             /* We always need to do something with the low byte, so there is no opportunity
             ** for optimization by skipping it.
             */
             CHECK (Expr->BitOffs < CHAR_BITS);
 
-            if (ED_NeedsTest (Expr)) {
-                /* If we need to do a test, then we avoid shifting (ASR only shifts one bit
-                ** at a time, so is slow) and just AND with the appropriate mask, then test
-                ** the result of that.
-                */
-
-                /* Avoid overly large shift on host platform. */
-                if (EndBit == sizeof (unsigned long) * CHAR_BIT) {
-                    g_and (F, (~0UL << Expr->BitOffs));
-                } else {
-                    g_and (F, ((1UL << EndBit) - 1) & (~0UL << Expr->BitOffs));
-                }
-
-                /* TODO: When long bit-fields are supported, an optimization to test only 3 bytes
-                ** when EndBit <= 24 is possible.
-                */
-                g_test (F);
+            if (ED_YetToTest (Expr)) {
+                g_testbitfield (Flags, Expr->BitOffs, Expr->BitWidth);
             } else {
-                /* Shift right by the bit offset; no code is emitted if BitOffs is zero */
-                g_asr (F, Expr->BitOffs);
-
-                /* Since we have now shifted down, we could do char ops when the width fits in
-                ** a char, but we also need to clear the high byte since we've been using
-                ** CF_FORCECHAR up to now.
-                */
-
-                /* And by the width if the field doesn't end on a char or int boundary.
-                ** If it does end on a boundary, then zeros have already been shifted in,
-                ** but we need to clear the high byte for char.  g_and emits no code if the mask
-                ** is all ones.
-                */
-                if (EndBit == CHAR_BITS) {
-                    /* We need to clear the high byte, since CF_FORCECHAR was set. */
-                    g_and (BitFieldFullWidthFlags | CF_CONST, 0xFF);
-                } else if (EndBit != INT_BITS) {
-                    g_and (BitFieldFullWidthFlags | CF_CONST, (0x0001U << Expr->BitWidth) - 1U);
-                }
+                g_extractbitfield (Flags, BitFieldFullWidthFlags, IsSignSigned (Expr->Type),
+                                   Expr->BitOffs, Expr->BitWidth);
             }
         }
 
@@ -283,7 +274,7 @@ void LoadExpr (unsigned Flags, struct ExprDesc* Expr)
         LoadAddress (Flags, Expr);
 
         /* Are we testing this value? */
-        if (ED_NeedsTest (Expr)) {
+        if (ED_YetToTest (Expr)) {
             /* Yes, force a test */
             g_test (Flags);
             ED_TestDone (Expr);

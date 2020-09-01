@@ -77,6 +77,7 @@ static void Parse (void)
 {
     int comma;
     SymEntry* Entry;
+    FuncDesc* FuncDef = 0;
 
     /* Go... */
     NextToken ();
@@ -139,19 +140,10 @@ static void Parse (void)
         comma = 0;
         while (1) {
 
-            Declaration         Decl;
+            Declaration Decl;
 
             /* Read the next declaration */
             ParseDecl (&Spec, &Decl, DM_NEED_IDENT);
-            if (Decl.Ident[0] == '\0') {
-                NextToken ();
-                break;
-            }
-
-            if ((Decl.StorageClass & SC_FICTITIOUS) == SC_FICTITIOUS) {
-                /* Failed parsing */
-                goto SkipOneDecl;
-            }
 
             /* Check if we must reserve storage for the variable. We do this,
             **
@@ -162,8 +154,9 @@ static void Parse (void)
             **
             ** This means that "extern int i;" will not get storage allocated.
             */
-            if ((Decl.StorageClass & SC_FUNC) != SC_FUNC          &&
-                (Decl.StorageClass & SC_TYPEMASK) != SC_TYPEDEF) {
+            if ((Decl.StorageClass & SC_FUNC) != SC_FUNC        &&
+                (Decl.StorageClass & SC_TYPEMASK) != SC_TYPEDEF &&
+                (Decl.StorageClass & SC_FICTITIOUS) != SC_FICTITIOUS) {
                 if ((Spec.Flags & DS_DEF_STORAGE) != 0                       ||
                     (Decl.StorageClass & (SC_EXTERN|SC_STATIC)) == SC_STATIC ||
                     ((Decl.StorageClass & SC_EXTERN) != 0 &&
@@ -177,18 +170,23 @@ static void Parse (void)
             }
 
             /* If this is a function declarator that is not followed by a comma
-            ** or semicolon, it must be followed by a function body. If this is
-            ** the case, convert an empty parameter list into one accepting no
-            ** parameters (same as void) as required by the standard.
+            ** or semicolon, it must be followed by a function body.
             */
-            if ((Decl.StorageClass & SC_FUNC) != 0 &&
-                (CurTok.Tok != TOK_COMMA)          &&
-                (CurTok.Tok != TOK_SEMI)) {
+            if ((Decl.StorageClass & SC_FUNC) != 0) {
+                if (CurTok.Tok != TOK_COMMA && CurTok.Tok != TOK_SEMI) {
+                    /* A definition */
+                    Decl.StorageClass |= SC_DEF;
 
-                FuncDesc* D = GetFuncDesc (Decl.Type);
-
-                if (D->Flags & FD_EMPTY) {
-                    D->Flags = (D->Flags & ~FD_EMPTY) | FD_VOID_PARAM;
+                    /* Convert an empty parameter list into one accepting no
+                    ** parameters (same as void) as required by the standard.
+                    */
+                    FuncDef = GetFuncDesc (Decl.Type);
+                    if (FuncDef->Flags & FD_EMPTY) {
+                        FuncDef->Flags = (FuncDef->Flags & ~FD_EMPTY) | FD_VOID_PARAM;
+                    }
+                } else {
+                    /* Just a declaration */
+                    Decl.StorageClass |= SC_DECL;
                 }
             }
 
@@ -290,7 +288,6 @@ static void Parse (void)
 
             }
 
-SkipOneDecl:
             /* Check for end of declaration list */
             if (CurTok.Tok == TOK_COMMA) {
                 NextToken ();
@@ -309,15 +306,8 @@ SkipOneDecl:
                     /* Prototype only */
                     NextToken ();
                 } else {
-
-                    /* Function body. Check for duplicate function definitions */
-                    if (SymIsDef (Entry)) {
-                        Error ("Body for function '%s' has already been defined",
-                               Entry->Name);
-                    }
-
                     /* Parse the function body */
-                    NewFunc (Entry);
+                    NewFunc (Entry, FuncDef);
                 }
             }
 
@@ -453,10 +443,6 @@ void Compile (const char* FileName)
                     }
 
                     Sym = GetSymType (GetElementType (Entry->Type));
-                    if (Size == 0 && Sym != 0 && SymIsDef (Sym)) {
-                        /* Array of 0-size elements */
-                        Warning ("Array '%s[]' has 0-sized elements", Entry->Name);
-                    }
                 }
 
                 /* For non-ESU types, Size != 0 */

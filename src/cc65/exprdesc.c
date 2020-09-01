@@ -58,7 +58,7 @@ ExprDesc* ED_Init (ExprDesc* Expr)
 {
     Expr->Sym       = 0;
     Expr->Type      = 0;
-    Expr->Flags     = 0;
+    Expr->Flags     = E_NEED_EAX;
     Expr->Name      = 0;
     Expr->IVal      = 0;
     Expr->FVal      = FP_D_Make (0.0);
@@ -110,6 +110,24 @@ int ED_IsIndExpr (const ExprDesc* Expr)
            !ED_IsLocNone (Expr) && !ED_IsLocPrimary (Expr);
 }
 #endif
+
+
+
+int ED_YetToLoad (const ExprDesc* Expr)
+/* Check if the expression needs to be loaded somehow. */
+{
+    return ED_NeedsPrimary (Expr)   ||
+           ED_YetToTest (Expr)      ||
+           (ED_IsLVal (Expr) && IsQualVolatile (Expr->Type));
+}
+
+
+
+void ED_MarkForUneval (ExprDesc* Expr)
+/* Mark the expression as not to be evaluated */
+{
+    Expr->Flags = (Expr->Flags & ~E_MASK_EVAL) | E_EVAL_UNEVAL;
+}
 
 
 
@@ -172,6 +190,15 @@ const char* ED_GetLabelName (const ExprDesc* Expr, long Offs)
         case E_LOC_LITERAL:
             /* Literal in the literal pool */
             if (Offs) {
+                SB_Printf (&Buf, "%s%+ld", PooledLiteralLabelName (Expr->Name), Offs);
+            } else {
+                SB_Printf (&Buf, "%s", PooledLiteralLabelName (Expr->Name));
+            }
+            break;
+
+        case E_LOC_CODE:
+            /* Code label location */
+            if (Offs) {
                 SB_Printf (&Buf, "%s%+ld", LocalLabelName (Expr->Name), Offs);
             } else {
                 SB_Printf (&Buf, "%s", LocalLabelName (Expr->Name));
@@ -206,7 +233,7 @@ ExprDesc* ED_MakeConstAbs (ExprDesc* Expr, long Value, Type* Type)
 {
     Expr->Sym   = 0;
     Expr->Type  = Type;
-    Expr->Flags = E_LOC_NONE | E_RTYPE_RVAL | (Expr->Flags & E_HAVE_MARKS);
+    Expr->Flags = E_LOC_NONE | E_RTYPE_RVAL | (Expr->Flags & E_MASK_KEEP_MAKE);
     Expr->Name  = 0;
     Expr->IVal  = Value;
     Expr->FVal  = FP_D_Make (0.0);
@@ -220,6 +247,20 @@ ExprDesc* ED_MakeConstAbsInt (ExprDesc* Expr, long Value)
 {
     Expr->Sym   = 0;
     Expr->Type  = type_int;
+    Expr->Flags = E_LOC_NONE | E_RTYPE_RVAL | (Expr->Flags & E_MASK_KEEP_MAKE);
+    Expr->Name  = 0;
+    Expr->IVal  = Value;
+    Expr->FVal  = FP_D_Make (0.0);
+    return Expr;
+}
+
+
+
+ExprDesc* ED_MakeConstBool (ExprDesc* Expr, long Value)
+/* Replace Expr with a constant boolean expression with the given value */
+{
+    Expr->Sym   = 0;
+    Expr->Type  = type_bool;
     Expr->Flags = E_LOC_NONE | E_RTYPE_RVAL | (Expr->Flags & E_HAVE_MARKS);
     Expr->Name  = 0;
     Expr->IVal  = Value;
@@ -234,7 +275,7 @@ ExprDesc* ED_FinalizeRValLoad (ExprDesc* Expr)
 {
     Expr->Sym   = 0;
     Expr->Flags &= ~(E_MASK_LOC | E_MASK_RTYPE | E_BITFIELD | E_ADDRESS_OF);
-    Expr->Flags &= ~(E_NEED_TEST | E_CC_SET);
+    Expr->Flags &= ~E_CC_SET;
     Expr->Flags |= (E_LOC_PRIMARY | E_RTYPE_RVAL);
     Expr->Name  = 0;
     Expr->IVal  = 0;    /* No offset */
@@ -398,7 +439,8 @@ int ED_IsBool (const ExprDesc* Expr)
     /* Either ints, floats, or pointers can be used in a boolean context */
     return IsClassInt (Expr->Type)   ||
            IsClassFloat (Expr->Type) ||
-           IsClassPtr (Expr->Type);
+           IsClassPtr (Expr->Type)   ||
+           IsClassFunc (Expr->Type);
 }
 
 
@@ -470,9 +512,9 @@ void PrintExprDesc (FILE* F, ExprDesc* E)
         Flags &= ~E_LOC_LITERAL;
         Sep = ',';
     }
-    if (Flags & E_RTYPE_LVAL) {
-        fprintf (F, "%cE_RTYPE_LVAL", Sep);
-        Flags &= ~E_RTYPE_LVAL;
+    if (Flags & E_LOC_CODE) {
+        fprintf (F, "%cE_LOC_CODE", Sep);
+        Flags &= ~E_LOC_CODE;
         Sep = ',';
     }
     if (Flags & E_BITFIELD) {
@@ -488,6 +530,11 @@ void PrintExprDesc (FILE* F, ExprDesc* E)
     if (Flags & E_CC_SET) {
         fprintf (F, "%cE_CC_SET", Sep);
         Flags &= ~E_CC_SET;
+        Sep = ',';
+    }
+    if (Flags & E_RTYPE_LVAL) {
+        fprintf (F, "%cE_RTYPE_LVAL", Sep);
+        Flags &= ~E_RTYPE_LVAL;
         Sep = ',';
     }
     if (Flags & E_ADDRESS_OF) {

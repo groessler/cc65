@@ -45,6 +45,7 @@
 #include "xmalloc.h"
 
 /* cc65 */
+#include "anonname.h"
 #include "asmcode.h"
 #include "asmlabel.h"
 #include "codegen.h"
@@ -558,9 +559,10 @@ static int HandleSymRedefinition (SymEntry* Entry, const Type* T, unsigned Flags
     unsigned E_SCType = Entry->Flags & SC_TYPEMASK;
     unsigned SCType   = Flags & SC_TYPEMASK;
 
-    /* Existing typedefs cannot be redeclared as anything different */
+    /* Some symbols may be redeclared if certain requirements are met */
     if (E_SCType == SC_TYPEDEF) {
 
+        /* Existing typedefs cannot be redeclared as anything different */
         if (SCType == SC_TYPEDEF) {
             if (TypeCmp (E_Type, T) < TC_IDENTICAL) {
                 Error ("Conflicting types for typedef '%s'", Entry->Name);
@@ -571,9 +573,42 @@ static int HandleSymRedefinition (SymEntry* Entry, const Type* T, unsigned Flags
             Entry = 0;
         }
 
+    } else if ((Entry->Flags & SC_FUNC) == SC_FUNC) {
+
+        /* In case of a function, use the new type descriptor, since it
+        ** contains pointers to the new symbol tables that are needed if
+        ** an actual function definition follows. Be sure not to use the
+        ** new descriptor if it contains a function declaration with an
+        ** empty parameter list.
+        */
+        if (IsTypeFunc (T)) {
+
+            /* Check for duplicate function definitions */
+            if (SymIsDef (Entry) && (Flags & SC_DEF) == SC_DEF) {
+                Error ("Body for function '%s' has already been defined",
+                        Entry->Name);
+                Entry = 0;
+            } else {
+                /* New type must be compatible with the composite prototype */
+                if (TypeCmp (Entry->Type, T) < TC_EQUAL) {
+                    Error ("Conflicting function types for '%s'", Entry->Name);
+                    Entry = 0;
+                } else {
+                    /* Refine the existing composite prototype with this new
+                    ** one.
+                    */
+                    RefineFuncDesc (Entry->Type, T);
+                }
+            }
+
+        } else {
+            Error ("Redefinition of function '%s' as different kind of symbol", Entry->Name);
+            Entry = 0;
+        }
+
     } else {
 
-        /* Some symbols may be redeclared if certain requirements are met */
+        /* Redeclarations of ESU types are checked elsewhere */
         if (IsTypeArray (T) && IsTypeArray (E_Type)) {
 
             /* Get the array sizes */
@@ -595,37 +630,6 @@ static int HandleSymRedefinition (SymEntry* Entry, const Type* T, unsigned Flags
                     /* Existing, size not given, use size from new def */
                     SetElementCount (E_Type, Size);
                 }
-            }
-
-        } else if ((Entry->Flags & SC_FUNC) == SC_FUNC) {
-
-            /* In case of a function, use the new type descriptor, since it
-            ** contains pointers to the new symbol tables that are needed if
-            ** an actual function definition follows. Be sure not to use the
-            ** new descriptor if it contains a function declaration with an
-            ** empty parameter list.
-            */
-            if (IsTypeFunc (T)) {
-
-                /* New type must be equivalent */
-                if (TypeCmp (E_Type, T) < TC_EQUAL) {
-                    Error ("Conflicting function types for '%s'", Entry->Name);
-                    Entry = 0;
-                } else {
-                    /* Get the function descriptor from the new type */
-                    FuncDesc* F = GetFuncDesc (T);
-                    /* Use this new function descriptor if it doesn't contain
-                    ** an empty parameter list.
-                    */
-                    if ((F->Flags & FD_EMPTY) == 0) {
-                        Entry->V.F.Func = F;
-                        SetFuncDesc (E_Type, F);
-                    }
-                }
-
-            } else {
-                Error ("Redefinition of function '%s' as different kind of symbol", Entry->Name);
-                Entry = 0;
             }
 
         } else {
@@ -682,13 +686,21 @@ static void AddSymEntry (SymTable* T, SymEntry* S)
 
 
 
-SymEntry* AddEnumSym (const char* Name, const Type* Type, SymTable* Tab)
+SymEntry* AddEnumSym (const char* Name, unsigned Flags, const Type* Type, SymTable* Tab, unsigned* DSFlags)
 /* Add an enum entry and return it */
 {
     SymTable* CurTagTab = TagTab;
+    SymEntry* Entry;
 
-    /* Do we have an entry with this name already? */
-    SymEntry* Entry = FindSymInTable (CurTagTab, Name, HashStr (Name));
+    if ((Flags & SC_FICTITIOUS) == 0) {
+        /* Do we have an entry with this name already? */
+        Entry = FindSymInTable (CurTagTab, Name, HashStr (Name));
+    } else {
+        /* Add a fictitious symbol in the fail-safe table */
+        Entry = 0;
+        CurTagTab = FailSafeTab;
+    }
+
     if (Entry) {
 
         /* We do have an entry. This may be a forward, so check it. */
@@ -707,6 +719,11 @@ SymEntry* AddEnumSym (const char* Name, const Type* Type, SymTable* Tab)
                 Entry->V.E.Type   = Type;
                 Entry->Flags     &= ~SC_DECL;
                 Entry->Flags     |= SC_DEF;
+
+                /* Remember this is the first definition of this type */
+                if (DSFlags != 0) {
+                    *DSFlags |= DS_NEW_TYPE_DEF;
+                }
             }
         }
 
@@ -729,6 +746,14 @@ SymEntry* AddEnumSym (const char* Name, const Type* Type, SymTable* Tab)
             Entry->Flags |= SC_DEF;
         }
 
+        /* Remember this is the first definition of this type */
+        if (CurTagTab != FailSafeTab && DSFlags != 0) {
+            if ((Entry->Flags & SC_DEF) != 0) {
+                *DSFlags |= DS_NEW_TYPE_DEF;
+            }
+            *DSFlags |= DS_NEW_TYPE_DECL;
+        }
+
         /* Add it to the current table */
         AddSymEntry (CurTagTab, Entry);
     }
@@ -739,7 +764,7 @@ SymEntry* AddEnumSym (const char* Name, const Type* Type, SymTable* Tab)
 
 
 
-SymEntry* AddStructSym (const char* Name, unsigned Flags, unsigned Size, SymTable* Tab)
+SymEntry* AddStructSym (const char* Name, unsigned Flags, unsigned Size, SymTable* Tab, unsigned* DSFlags)
 /* Add a struct/union entry and return it */
 {
     SymTable* CurTagTab = TagTab;
@@ -749,8 +774,15 @@ SymEntry* AddStructSym (const char* Name, unsigned Flags, unsigned Size, SymTabl
     /* Type must be struct or union */
     PRECONDITION (Type == SC_STRUCT || Type == SC_UNION);
 
-    /* Do we have an entry with this name already? */
-    Entry = FindSymInTable (CurTagTab, Name, HashStr (Name));
+    if ((Flags & SC_FICTITIOUS) == 0) {
+        /* Do we have an entry with this name already? */
+        Entry = FindSymInTable (CurTagTab, Name, HashStr (Name));
+    } else {
+        /* Add a fictitious symbol in the fail-safe table */
+        Entry = 0;
+        CurTagTab = FailSafeTab;
+    }
+
     if (Entry) {
 
         /* We do have an entry. This may be a forward, so check it. */
@@ -772,6 +804,11 @@ SymEntry* AddStructSym (const char* Name, unsigned Flags, unsigned Size, SymTabl
                 Entry->Flags      = Flags;
                 Entry->V.S.SymTab = Tab;
                 Entry->V.S.Size   = Size;
+
+                /* Remember this is the first definition of this type */
+                if (DSFlags != 0) {
+                    *DSFlags |= DS_NEW_TYPE_DEF;
+                }
             }
         }
 
@@ -790,6 +827,14 @@ SymEntry* AddStructSym (const char* Name, unsigned Flags, unsigned Size, SymTabl
         Entry->V.S.SymTab = Tab;
         Entry->V.S.Size   = Size;
 
+        /* Remember this is the first definition of this type */
+        if (CurTagTab != FailSafeTab && DSFlags != 0) {
+            if ((Entry->Flags & SC_DEF) != 0) {
+                *DSFlags |= DS_NEW_TYPE_DEF;
+            }
+            *DSFlags |= DS_NEW_TYPE_DECL;
+        }
+
         /* Add it to the current tag table */
         AddSymEntry (CurTagTab, Entry);
     }
@@ -800,7 +845,8 @@ SymEntry* AddStructSym (const char* Name, unsigned Flags, unsigned Size, SymTabl
 
 
 
-SymEntry* AddBitField (const char* Name, unsigned Offs, unsigned BitOffs, unsigned BitWidth)
+SymEntry* AddBitField (const char* Name, const Type* T, unsigned Offs,
+                       unsigned BitOffs, unsigned BitWidth, int SignednessSpecified)
 /* Add a bit field to the local symbol table and return the symbol entry */
 {
     /* Do we have an entry with this name already? */
@@ -815,11 +861,20 @@ SymEntry* AddBitField (const char* Name, unsigned Offs, unsigned BitOffs, unsign
         /* Create a new entry */
         Entry = NewSymEntry (Name, SC_BITFIELD);
 
-        /* Set the symbol attributes. Bit-fields are always of type unsigned */
-        Entry->Type         = type_uint;
+        /* Set the symbol attributes. Bit-fields are always integral types. */
+        Entry->Type         = TypeDup (T);
         Entry->V.B.Offs     = Offs;
         Entry->V.B.BitOffs  = BitOffs;
         Entry->V.B.BitWidth = BitWidth;
+
+        if (!SignednessSpecified) {
+            /* int is treated as signed int everywhere except bit-fields; switch it to unsigned,
+            ** since this is allowed for bit-fields and avoids sign-extension, so is much faster.
+            */
+            CHECK ((Entry->Type->C & T_MASK_SIGN) == T_SIGN_SIGNED);
+            Entry->Type->C &= ~T_MASK_SIGN;
+            Entry->Type->C |= T_SIGN_UNSIGNED;
+        }
 
         /* Add the entry to the symbol table */
         AddSymEntry (SymTab, Entry);
@@ -876,7 +931,7 @@ DefOrRef* AddDefOrRef (SymEntry* E, unsigned Flags)
     DOR->Flags = Flags;
     DOR->StackPtr = StackPtr;
     DOR->Depth = CollCount (&CurrentFunc->LocalsBlockStack);
-    DOR->LateSP_Label = GetLocalLabel ();
+    DOR->LateSP_Label = GetLocalDataLabel ();
 
     return DOR;
 }
@@ -898,7 +953,7 @@ unsigned short FindSPAdjustment (const char* Name)
 
 
 SymEntry* AddLabelSym (const char* Name, unsigned Flags)
-/* Add a goto label to the label table */
+/* Add a C goto label to the label table */
 {
     unsigned i;
     DefOrRef *DOR, *NewDOR;
@@ -957,7 +1012,7 @@ SymEntry* AddLabelSym (const char* Name, unsigned Flags)
                     /* Optimizer will need the information about the value of SP adjustment
                     ** later, so let's preserve it.
                     */
-                    E = NewSymEntry (LocalLabelName (DOR->LateSP_Label), SC_SPADJUSTMENT);
+                    E = NewSymEntry (LocalDataLabelName (DOR->LateSP_Label), SC_SPADJUSTMENT);
                     E->V.SPAdjustment = StackPtr - DOR->StackPtr;
                     AddSymEntry (SPAdjustTab, E);
                 }
@@ -1013,6 +1068,7 @@ SymEntry* AddLocalSym (const char* Name, const Type* T, unsigned Flags, int Offs
 /* Add a local symbol and return the symbol entry */
 {
     SymTable* Tab = SymTab;
+    ident Ident;
 
     /* Do we have an entry with this name already? */
     SymEntry* Entry = FindSymInTable (Tab, Name, HashStr (Name));
@@ -1026,12 +1082,33 @@ SymEntry* AddLocalSym (const char* Name, const Type* T, unsigned Flags, int Offs
             if (SymIsDef (Entry) && (Flags & SC_DEF) == SC_DEF) {
                 Error ("Multiple definition of '%s'", Entry->Name);
                 Entry = 0;
+            } else if ((Flags & (SC_AUTO | SC_REGISTER)) != 0 &&
+                       (Entry->Flags & SC_EXTERN) != 0) {
+                /* Check for local storage class conflict */
+                Error ("Declaration of '%s' with no linkage follows extern declaration",
+                       Name);
+                Entry = 0;
+            } else {
+                /* If a static declaration follows a non-static declaration,
+                ** then it is an error.
+                */
+                if ((Flags & SC_DEF)            &&
+                    (Flags & SC_EXTERN) == 0    &&
+                    (Entry->Flags & SC_EXTERN) != 0) {
+                    Error ("Static declaration of '%s' follows extern declaration", Name);
+                    Entry = 0;
+                }
             }
         }
 
         if (Entry == 0) {
-            /* Use the fail-safe table for fictitious symbols */
-            Tab = FailSafeTab;
+            if ((Flags & SC_PARAM) != 0) {
+                /* Use anonymous names */
+                Name = AnonName (Ident, "param");
+            } else {
+                /* Use the fail-safe table for fictitious symbols */
+                Tab = FailSafeTab;
+            }
         }
     }
     
@@ -1052,20 +1129,20 @@ SymEntry* AddLocalSym (const char* Name, const Type* T, unsigned Flags, int Offs
         } else if ((Flags & SC_REGISTER) == SC_REGISTER) {
             Entry->V.R.RegOffs  = Offs;
             Entry->V.R.SaveOffs = StackPtr;
-        } else if ((Flags & SC_EXTERN) == SC_EXTERN) {
+        } else if ((Flags & SC_EXTERN) == SC_EXTERN ||
+                   (Flags & SC_FUNC) == SC_FUNC) {
             Entry->V.L.Label = Offs;
             SymSetAsmName (Entry);
         } else if ((Flags & SC_STATIC) == SC_STATIC) {
-            /* Generate the assembler name from the label number */
+            /* Generate the assembler name from the data label number */
             Entry->V.L.Label = Offs;
-            Entry->AsmName = xstrdup (LocalLabelName (Entry->V.L.Label));
+            Entry->AsmName = xstrdup (LocalDataLabelName (Entry->V.L.Label));
         } else {
             Internal ("Invalid flags in AddLocalSym: %04X", Flags);
         }
 
         /* Add the entry to the symbol table */
         AddSymEntry (Tab, Entry);
-
     }
 
     /* Return the entry */
@@ -1077,50 +1154,65 @@ SymEntry* AddLocalSym (const char* Name, const Type* T, unsigned Flags, int Offs
 SymEntry* AddGlobalSym (const char* Name, const Type* T, unsigned Flags)
 /* Add an external or global symbol to the symbol table and return the entry */
 {
-    /* There is some special handling for functions, so check if it is one */
-    int IsFunc = IsTypeFunc (T);
-
-    /* Functions must be inserted in the global symbol table */
-    SymTable* Tab = IsFunc ? SymTab0 : SymTab;
+    /* Use the global symbol table */
+    SymTable* Tab = SymTab;
 
     /* Do we have an entry with this name already? */
-    SymEntry* Entry = FindSymInTable (Tab, Name, HashStr (Name));
+    SymEntry* Entry = FindSymInTree (Tab, Name);
     if (Entry) {
-
         /* We have a symbol with this name already */
         if (HandleSymRedefinition (Entry, T, Flags)) {
-            /* Use the fail-safe table for fictitious symbols */
-            Tab   = FailSafeTab;
             Entry = 0;
-
-        } else {
-
+        } else if ((Entry->Flags & (SC_AUTO | SC_REGISTER)) != 0) {
+            /* Check for local storage class conflict */
+            Error ("Extern declaration of '%s' follows declaration with no linkage",
+                   Name);
+            Entry = 0;
+        } else if ((Flags & SC_ESUTYPEMASK) != SC_TYPEDEF) {
             /* If a static declaration follows a non-static declaration, then
-            ** warn about the conflict.  (It will compile a public declaration.)
+            ** diagnose the conflict. It will warn and compile an extern
+            ** declaration if both declarations are global, otherwise give an
+            ** error.
             */
-            if ((Flags & SC_EXTERN) == 0 && (Entry->Flags & SC_EXTERN) != 0) {
-                Warning ("static declaration follows non-static declaration of '%s'.", Name);
+            if (Tab == SymTab0 &&
+                (Flags & SC_EXTERN) == 0    &&
+                (Entry->Flags & SC_EXTERN) != 0) {
+                Warning ("Static declaration of '%s' follows non-static declaration", Name);
+            } else if ((Flags & SC_EXTERN) != 0                                     &&
+                       (Entry->Owner == SymTab0 || (Entry->Flags & SC_DEF) != 0)    &&
+                       (Entry->Flags & SC_EXTERN) == 0) {
+                /* It is OK if a global extern declaration follows a global
+                ** non-static declaration, but an error if either of them is
+                ** local, as the two would be referring to different objects.
+                ** It is an error as well if a global non-static declaration
+                ** follows a global static declaration.
+                */
+                if (Entry->Owner == SymTab0) {
+                    if ((Flags & SC_STORAGE) == 0) {
+                        /* Linkage must be unchanged */
+                        Flags &= ~SC_EXTERN;
+                    } else {
+                        Error ("Non-static declaration of '%s' follows static declaration", Name);
+                    }
+                } else {
+                    Error ("Extern declaration of '%s' follows static declaration", Name);
+                    Entry = 0;
+                }
             }
 
-            /* An extern declaration must not change the current linkage. */
-            if (IsFunc || (Flags & (SC_EXTERN | SC_STORAGE)) == SC_EXTERN) {
-                Flags &= ~SC_EXTERN;
+            if (Entry) {
+                /* Add the new flags */
+                Entry->Flags |= Flags;
             }
-
-            /* If a public declaration follows a static declaration, then
-            ** warn about the conflict.  (It will compile a public declaration.)
-            */
-            if ((Flags & SC_EXTERN) != 0 && (Entry->Flags & SC_EXTERN) == 0) {
-                Warning ("public declaration follows static declaration of '%s'.", Name);
-            }
-
-            /* Add the new flags */
-            Entry->Flags |= Flags;
         }
 
+        if (Entry == 0) {
+            /* Use the fail-safe table for fictitious symbols */
+            Tab = FailSafeTab;
+        }
     } 
     
-    if (Entry == 0) {
+    if (Entry == 0 || Entry->Owner != Tab) {
 
         /* Create a new entry */
         Entry = NewSymEntry (Name, Flags);
@@ -1128,12 +1220,9 @@ SymEntry* AddGlobalSym (const char* Name, const Type* T, unsigned Flags)
         /* Set the symbol attributes */
         Entry->Type = TypeDup (T);
 
-        /* If this is a function, set the function descriptor and clear
-        ** additional fields.
-        */
-        if (IsFunc) {
-            Entry->V.F.Func = GetFuncDesc (Entry->Type);
-            Entry->V.F.Seg  = 0;
+        /* If this is a function, clear additional fields */
+        if (IsTypeFunc (T)) {
+            Entry->V.F.Seg = 0;
         }
 
         /* Add the assembler name of the symbol */

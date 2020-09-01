@@ -59,12 +59,14 @@
 
 
 /* Predefined type strings */
+Type type_char[]        = { TYPE(T_CHAR),   TYPE(T_END) };
 Type type_schar[]       = { TYPE(T_SCHAR),  TYPE(T_END) };
 Type type_uchar[]       = { TYPE(T_UCHAR),  TYPE(T_END) };
 Type type_int[]         = { TYPE(T_INT),    TYPE(T_END) };
 Type type_uint[]        = { TYPE(T_UINT),   TYPE(T_END) };
 Type type_long[]        = { TYPE(T_LONG),   TYPE(T_END) };
 Type type_ulong[]       = { TYPE(T_ULONG),  TYPE(T_END) };
+Type type_bool[]        = { TYPE(T_INT),    TYPE(T_END) };
 Type type_void[]        = { TYPE(T_VOID),   TYPE(T_END) };
 Type type_size_t[]      = { TYPE(T_SIZE_T), TYPE(T_END) };
 Type type_float[]       = { TYPE(T_FLOAT),  TYPE(T_END) };
@@ -83,7 +85,7 @@ static struct StrBuf* GetFullTypeNameWestEast (struct StrBuf* West, struct StrBu
 ** eastern part.
 */
 {
-    struct StrBuf Buf = STATIC_STRBUF_INITIALIZER;
+    struct StrBuf Buf = AUTO_STRBUF_INITIALIZER;
 
     if (IsTypeArray (T)) {
 
@@ -117,28 +119,27 @@ static struct StrBuf* GetFullTypeNameWestEast (struct StrBuf* West, struct StrBu
 
     } else if (IsTypeFunc (T)) {
 
-        FuncDesc* F             = GetFuncDesc (T);
-        struct StrBuf ParamList = STATIC_STRBUF_INITIALIZER;
+        FuncDesc* D             = GetFuncDesc (T);
+        struct StrBuf ParamList = AUTO_STRBUF_INITIALIZER;
 
         /* First argument */
-        SymEntry* Param = F->SymTab->SymHead;
-        for (unsigned I = 1; I < F->ParamCount; ++I) {
-            CHECK (Param->NextSym != 0 && (Param->Flags & SC_PARAM) != 0);
+        SymEntry* Param = D->SymTab->SymHead;
+        for (unsigned I = 0; I < D->ParamCount; ++I) {
+            CHECK (Param != 0 && (Param->Flags & SC_PARAM) != 0);
+            if (I > 0) {
+                SB_AppendStr (&ParamList, ", ");
+            }
             SB_AppendStr (&ParamList, SB_GetConstBuf (GetFullTypeNameBuf (&Buf, Param->Type)));
-            SB_AppendStr (&ParamList, ", ");
             SB_Clear (&Buf);
             /* Next argument */
             Param = Param->NextSym;
         }
-        if ((F->Flags & FD_VARIADIC) == 0) {
-            if (F->ParamCount > 0) {
-                SB_AppendStr (&ParamList, SB_GetConstBuf (GetFullTypeNameBuf (&Buf, Param->Type)));
-            } else if ((F->Flags & FD_EMPTY) == 0) {
+        if ((D->Flags & FD_VARIADIC) == 0) {
+            if (D->ParamCount == 0 && (D->Flags & FD_EMPTY) == 0) {
                 SB_AppendStr (&ParamList, "void");
             }
         } else {
-            if (F->ParamCount > 0) {
-                SB_AppendStr (&ParamList, SB_GetConstBuf (GetFullTypeNameBuf (&Buf, Param->Type)));
+            if (D->ParamCount > 0) {
                 SB_AppendStr (&ParamList, ", ...");
             } else {
                 SB_AppendStr (&ParamList, "...");
@@ -235,7 +236,7 @@ const char* GetBasicTypeName (const Type* T)
     default:                break;
     }
     if (IsClassInt (T)) {
-        if (IsSignSigned (T)) {
+        if (IsRawSignSigned (T)) {
             switch (GetRawType (T)) {
             case T_TYPE_CHAR:       return "signed char";
             case T_TYPE_SHORT:      return "short";
@@ -245,7 +246,7 @@ const char* GetBasicTypeName (const Type* T)
             default:
                 return "signed integer";
             }
-        } else if (IsSignUnsigned (T)) {
+        } else if (IsRawSignUnsigned (T)) {
             switch (GetRawType (T)) {
             case T_TYPE_CHAR:       return "unsigned char";
             case T_TYPE_SHORT:      return "unsigned short";
@@ -286,7 +287,7 @@ const char* GetFullTypeName (const Type* T)
 struct StrBuf* GetFullTypeNameBuf (struct StrBuf* S, const Type* T)
 /* Return the full name string of the given type */
 {
-    struct StrBuf East = STATIC_STRBUF_INITIALIZER;
+    struct StrBuf East = AUTO_STRBUF_INITIALIZER;
     GetFullTypeNameWestEast (S, &East, T);
 
     /* Join West and East */
@@ -432,14 +433,6 @@ int SignExtendChar (int C)
 
 
 
-TypeCode GetDefaultChar (void)
-/* Return the default char type (signed/unsigned) depending on the settings */
-{
-    return IS_Get (&SignedChars)? T_SCHAR : T_UCHAR;
-}
-
-
-
 Type* GetCharArrayType (unsigned Len)
 /* Return the type for a char array of the given length */
 {
@@ -449,7 +442,7 @@ Type* GetCharArrayType (unsigned Len)
     /* Fill the type string */
     T[0].C   = T_ARRAY;
     T[0].A.L = Len;             /* Array length is in the L attribute */
-    T[1].C   = GetDefaultChar ();
+    T[1].C   = T_CHAR;
     T[2].C   = T_END;
 
     /* Return the new type */
@@ -586,155 +579,85 @@ Type* PointerTo (const Type* T)
 
 
 
-static TypeCode PrintTypeComp (FILE* F, TypeCode C, TypeCode Mask, const char* Name)
-/* Check for a specific component of the type. If it is there, print the
-** name and remove it. Return the type with the component removed.
-*/
-{
-    if ((C & Mask) == Mask) {
-        fprintf (F, "%s ", Name);
-        C &= ~Mask;
-    }
-    return C;
-}
-
-
-
 void PrintType (FILE* F, const Type* T)
-/* Output translation of type array. */
+/* Print fulle name of the type */
 {
-    /* Walk over the type string */
-    while (T->C != T_END) {
-
-        /* Get the type code */
-        TypeCode C = T->C;
-
-        /* Print any qualifiers */
-        C = PrintTypeComp (F, C, T_QUAL_CONST, "const");
-        C = PrintTypeComp (F, C, T_QUAL_VOLATILE, "volatile");
-        C = PrintTypeComp (F, C, T_QUAL_RESTRICT, "restrict");
-        C = PrintTypeComp (F, C, T_QUAL_NEAR, "__near__");
-        C = PrintTypeComp (F, C, T_QUAL_FAR, "__far__");
-        C = PrintTypeComp (F, C, T_QUAL_FASTCALL, "__fastcall__");
-        C = PrintTypeComp (F, C, T_QUAL_CDECL, "__cdecl__");
-
-        /* Signedness. Omit the signedness specifier for long and int */
-        if ((C & T_MASK_TYPE) != T_TYPE_INT && (C & T_MASK_TYPE) != T_TYPE_LONG) {
-            C = PrintTypeComp (F, C, T_SIGN_SIGNED, "signed");
-        }
-        C = PrintTypeComp (F, C, T_SIGN_UNSIGNED, "unsigned");
-
-        /* Now check the real type */
-        switch (C & T_MASK_TYPE) {
-            case T_TYPE_CHAR:
-                fprintf (F, "char");
-                break;
-            case T_TYPE_SHORT:
-                fprintf (F, "short");
-                break;
-            case T_TYPE_INT:
-                fprintf (F, "int");
-                break;
-            case T_TYPE_LONG:
-                fprintf (F, "long");
-                break;
-            case T_TYPE_LONGLONG:
-                fprintf (F, "long long");
-                break;
-            case T_TYPE_ENUM:
-                fprintf (F, "enum");
-                break;
-            case T_TYPE_FLOAT:
-                fprintf (F, "float");
-                break;
-            case T_TYPE_DOUBLE:
-                fprintf (F, "double");
-                break;
-            case T_TYPE_VOID:
-                fprintf (F, "void");
-                break;
-            case T_TYPE_STRUCT:
-                fprintf (F, "struct %s", ((SymEntry*) T->A.P)->Name);
-                break;
-            case T_TYPE_UNION:
-                fprintf (F, "union %s", ((SymEntry*) T->A.P)->Name);
-                break;
-            case T_TYPE_ARRAY:
-                /* Recursive call */
-                PrintType (F, T + 1);
-                if (T->A.L == UNSPECIFIED) {
-                    fprintf (F, " []");
-                } else {
-                    fprintf (F, " [%ld]", T->A.L);
-                }
-                return;
-            case T_TYPE_PTR:
-                /* Recursive call */
-                PrintType (F, T + 1);
-                fprintf (F, " *");
-                return;
-            case T_TYPE_FUNC:
-                fprintf (F, "function returning ");
-                break;
-            default:
-                fprintf (F, "unknown type: %04lX", T->C);
-        }
-
-        /* Next element */
-        ++T;
-    }
+    StrBuf Buf = AUTO_STRBUF_INITIALIZER;
+    fprintf (F, "%s", SB_GetConstBuf (GetFullTypeNameBuf (&Buf, T)));
+    SB_Done (&Buf);
 }
 
 
 
 void PrintFuncSig (FILE* F, const char* Name, Type* T)
-/* Print a function signature. */
+/* Print a function signature */
 {
-    /* Get the function descriptor */
-    const FuncDesc* D = GetFuncDesc (T);
+    StrBuf Buf       = AUTO_STRBUF_INITIALIZER;
+    StrBuf ParamList = AUTO_STRBUF_INITIALIZER;
+    StrBuf East      = AUTO_STRBUF_INITIALIZER;
+    StrBuf West      = AUTO_STRBUF_INITIALIZER;
 
-    /* Print a comment with the function signature */
-    PrintType (F, GetFuncReturn (T));
-    if (IsQualNear (T)) {
-        fprintf (F, " __near__");
-    }
-    if (IsQualFar (T)) {
-        fprintf (F, " __far__");
-    }
-    if (IsQualFastcall (T)) {
-        fprintf (F, " __fastcall__");
-    }
-    if (IsQualCDecl (T)) {
-        fprintf (F, " __cdecl__");
-    }
-    fprintf (F, " %s (", Name);
+    /* Get the function descriptor used in definition */
+    const FuncDesc* D = GetFuncDefinitionDesc (T);
 
-    /* Parameters */
-    if (D->Flags & FD_VOID_PARAM) {
-        fprintf (F, "void");
+    /* Get the parameter list string. Start from the first parameter */
+    SymEntry* Param = D->SymTab->SymHead;
+    for (unsigned I = 0; I < D->ParamCount; ++I) {
+        CHECK (Param != 0 && (Param->Flags & SC_PARAM) != 0);
+        if (I > 0) {
+            SB_AppendStr (&ParamList, ", ");
+        }
+        if (SymIsRegVar (Param)) {
+            SB_AppendStr (&ParamList, "register ");
+        }
+        if (!HasAnonName (Param)) {
+            SB_AppendStr (&Buf, Param->Name);
+        }
+        SB_AppendStr (&ParamList, SB_GetConstBuf (GetFullTypeNameBuf (&Buf, Param->Type)));
+        SB_Clear (&Buf);
+        /* Next argument */
+        Param = Param->NextSym;
+    }
+    if ((D->Flags & FD_VARIADIC) == 0) {
+        if (D->ParamCount == 0 && (D->Flags & FD_EMPTY) == 0) {
+            SB_AppendStr (&ParamList, "void");
+        }
     } else {
-        unsigned I;
-        SymEntry* E = D->SymTab->SymHead;
-        for (I = 0; I < D->ParamCount; ++I) {
-            if (I > 0) {
-                fprintf (F, ", ");
-            }
-            if (SymIsRegVar (E)) {
-                fprintf (F, "register ");
-            }
-            PrintType (F, E->Type);
-            E = E->NextSym;
+        if (D->ParamCount > 0) {
+            SB_AppendStr (&ParamList, ", ...");
+        } else {
+            SB_AppendStr (&ParamList, "...");
         }
     }
+    SB_Terminate (&ParamList);
 
-    /* End of parameter list */
-    fprintf (F, ")");
+    /* Get the function qualifiers */
+    if (GetQualifierTypeCodeNameBuf (&Buf, T->C, T_QUAL_NONE) > 0) {
+        /* Append a space between the qualifiers and the name */
+        SB_AppendChar (&Buf, ' ');
+    }
+    SB_Terminate (&Buf);
+
+    /* Get the signature string without the return type */
+    SB_Printf (&West, "%s%s (%s)", SB_GetConstBuf (&Buf), Name, SB_GetConstBuf (&ParamList));
+    SB_Done (&Buf);
+    SB_Done (&ParamList);
+
+    /* Complete with the return type */
+    GetFullTypeNameWestEast (&West, &East, GetFuncReturn (T));
+    SB_Append (&West, &East);
+    SB_Terminate (&West);
+
+    /* Output */
+    fprintf (F, "%s", SB_GetConstBuf (&West));
+    SB_Done (&East);
+    SB_Done (&West);
 }
 
 
 
 void PrintRawType (FILE* F, const Type* T)
-/* Print a type string in raw format (for debugging) */
+/* Print a type string in raw hex format (for debugging) */
 {
     while (T->C != T_END) {
         fprintf (F, "%04lX ", T->C);
@@ -756,14 +679,18 @@ int TypeHasAttr (const Type* T)
 const Type* GetUnderlyingType (const Type* Type)
 /* Get the underlying type of an enum or other integer class type */
 {
-    if (IsTypeEnum (Type)) {
-
+    if (IsISOChar (Type)) {
+        return IS_Get (&SignedChars) ? type_schar : type_uchar;
+    } else if (IsTypeEnum (Type)) {
         /* This should not happen, but just in case */
         if (Type->A.P == 0) {
             Internal ("Enum tag type error in GetUnderlyingTypeCode");
         }
 
-        return ((SymEntry*)Type->A.P)->V.E.Type;
+        /* If incomplete enum type is used, just return its raw type */
+        if (((SymEntry*)Type->A.P)->V.E.Type != 0) {
+            return ((SymEntry*)Type->A.P)->V.E.Type;
+        }
     }
 
     return Type;
@@ -779,8 +706,11 @@ TypeCode GetUnderlyingTypeCode (const Type* Type)
     TypeCode Underlying = UnqualifiedType (Type->C);
     TypeCode TCode;
 
-    /* We could also support other T_CLASS_INT types, but just enums for now */
-    if (IsTypeEnum (Type)) {
+    if (IsISOChar (Type)) {
+
+        return IS_Get (&SignedChars) ? T_SCHAR : T_UCHAR;
+
+    } else if (IsTypeEnum (Type)) {
 
         /* This should not happen, but just in case */
         if (Type->A.P == 0) {
@@ -974,6 +904,7 @@ unsigned TypeOf (const Type* T)
             /* Address of ... */
             return CF_INT | CF_UNSIGNED;
 
+        case T_VOID:
         case T_ENUM:
             /* Incomplete enum type */
             Error ("Incomplete type '%s'", GetFullTypeName (T));
@@ -1037,10 +968,69 @@ Type* ArrayToPtr (Type* T)
 
 
 
+int IsClassObject (const Type* T)
+/* Return true if this is a fully described object type */
+{
+    return !IsTypeFunc (T) && !IsClassIncomplete (T);
+}
+
+
+
+int IsClassIncomplete (const Type* T)
+/* Return true if this is an object type lacking size info */
+{
+    if (IsTypeArray (T)) {
+        return GetElementCount (T) == UNSPECIFIED || IsClassIncomplete (T + 1);
+    }
+    return IsTypeVoid (T) || IsIncompleteESUType (T);
+}
+
+
+
 int IsClassArithmetic (const Type* T)
-/* Return true if this is an arithmetic type */
+/* Return true if this is an integer or real floating type */
 {
     return IsClassInt (T) || IsClassFloat (T);
+}
+
+
+
+int IsClassBasic (const Type* T)
+/* Return true if this is a char, integer or floating type */
+{
+    return IsClassChar (T) || IsClassInt (T) || IsClassFloat (T);
+}
+
+
+
+int IsClassScalar (const Type* T)
+/* Return true if this is an arithmetic or pointer type */
+{
+    return IsClassArithmetic (T) || IsTypePtr (T);
+}
+
+
+
+int IsClassDerived (const Type* T)
+/* Return true if this is an array, struct, union, function or pointer type */
+{
+    return IsTypeArray (T) || IsClassStruct (T) || IsClassFunc (T) || IsTypePtr (T);
+}
+
+
+
+int IsClassAggregate (const Type* T)
+/* Return true if this is an array or struct type */
+{
+    return IsTypeArray (T) || IsTypeStruct (T);
+}
+
+
+
+int IsRelationType (const Type* T)
+/* Return true if this is an arithmetic, array or pointer type */
+{
+    return IsClassArithmetic (T) || IsClassPtr (T);
 }
 
 
@@ -1048,7 +1038,44 @@ int IsClassArithmetic (const Type* T)
 int IsCastType (const Type* T)
 /* Return true if this type can be used for casting */
 {
-    return IsClassArithmetic (T) || IsClassPtr (T) || IsTypeVoid (T);
+    return IsClassScalar (T) || IsTypeVoid (T);
+}
+
+
+
+int IsESUType (const Type* T)
+/* Return true if this is an enum/struct/union type */
+{
+    return IsClassStruct (T) || IsTypeEnum (T);
+}
+
+
+
+int IsIncompleteESUType (const Type* T)
+/* Return true if this is an incomplete ESU type */
+{
+    SymEntry* Sym = GetSymType (T);
+
+    return Sym != 0 && !SymIsDef (Sym);
+}
+
+
+
+int IsEmptiableObjectType (const Type* T)
+/* Return true if this is a struct/union/void type that can have zero size */
+{
+    return IsClassStruct (T) || IsTypeVoid (T);
+}
+
+
+
+int HasUnknownSize (const Type* T)
+/* Return true if this is an incomplete ESU type or an array of unknown size */
+{
+    if (IsTypeArray (T)) {
+        return GetElementCount (T) == UNSPECIFIED || HasUnknownSize (T + 1);
+    }
+    return IsIncompleteESUType (T);
 }
 
 
@@ -1111,6 +1138,20 @@ Type* GetFuncReturn (Type* T)
 
     /* Return a pointer to the return type */
     return T + 1;
+}
+
+
+
+FuncDesc* GetFuncDefinitionDesc (Type* T)
+/* Get the function descriptor of the function definition */
+{
+    FuncDesc* D;
+
+    /* Be sure it's a function type */
+    CHECK (IsClassFunc (T));
+
+    D = GetFuncDesc (T);
+    return D->FuncDef != 0 ? D->FuncDef : D;
 }
 
 
@@ -1192,13 +1233,32 @@ Type* IntPromotion (Type* T)
     /* We must have an int to apply int promotions */
     PRECONDITION (IsClassInt (T));
 
-    /* An integer can represent all values from either signed or unsigned char,
-    ** so convert chars to int and leave all other types alone.
+    /* https://port70.net/~nsz/c/c89/c89-draft.html#3.2.1.1
+    ** A char, a short int, or an int bit-field, or their signed or unsigned varieties, or an
+    ** object that has enumeration type, may be used in an expression wherever an int or
+    ** unsigned int may be used. If an int can represent all values of the original type, the value
+    ** is converted to an int; otherwise it is converted to an unsigned int.
+    ** These are called the integral promotions.
     */
+
     if (IsTypeChar (T)) {
+        /* An integer can represent all values from either signed or unsigned char, so convert
+        ** chars to int.
+        */
         return type_int;
-    } else {
+    } else if (IsTypeShort (T)) {
+        /* An integer cannot represent all values from unsigned short, so convert unsigned short
+        ** to unsigned int.
+        */
+        return IsSignUnsigned (T) ? type_uint : type_int;
+    } else if (!IsIncompleteESUType (T)) {
+        /* The type is a complete type not smaller than int, so leave it alone. */
         return T;
+    } else {
+        /* Otherwise, this is an incomplete enum, and there is expceted to be an error already.
+        ** Assume int to avoid further errors.
+        */
+        return type_int;
     }
 }
 

@@ -64,31 +64,31 @@
 
 
 static unsigned AllocLabel (void (*UseSeg) ())
-/* Switch to a segment, define a local label and return it */
+/* Switch to a segment, define a local data label and return it */
 {
-    unsigned Label;
+    unsigned DataLabel;
 
     /* Switch to the segment */
     UseSeg ();
 
     /* Define the variable label */
-    Label = GetLocalLabel ();
-    g_defdatalabel (Label);
+    DataLabel = GetLocalDataLabel ();
+    g_defdatalabel (DataLabel);
 
     /* Return the label */
-    return Label;
+    return DataLabel;
 }
 
 
 
-static void AllocStorage (unsigned Label, void (*UseSeg) (), unsigned Size)
-/* Reserve Size bytes of BSS storage prefixed by a local label. */
+static void AllocStorage (unsigned DataLabel, void (*UseSeg) (), unsigned Size)
+/* Reserve Size bytes of BSS storage prefixed by a local data label. */
 {
     /* Switch to the segment */
     UseSeg ();
 
     /* Define the variable label */
-    g_defdatalabel (Label);
+    g_defdatalabel (DataLabel);
 
     /* Reserve space for the data */
     g_res (Size);
@@ -122,8 +122,6 @@ static void ParseRegisterDecl (Declaration* Decl, int Reg)
     /* Check for an optional initialization */
     if (CurTok.Tok == TOK_ASSIGN) {
 
-        ExprDesc Expr;
-
         /* Skip the '=' */
         NextToken ();
 
@@ -152,6 +150,9 @@ static void ParseRegisterDecl (Declaration* Decl, int Reg)
 
         } else {
 
+            ExprDesc Expr;
+            ED_Init (&Expr);
+
             /* Parse the expression */
             hie1 (&Expr);
 
@@ -172,7 +173,11 @@ static void ParseRegisterDecl (Declaration* Decl, int Reg)
 
     /* Cannot allocate a variable of zero size */
     if (Size == 0) {
-        Error ("Variable '%s' has unknown size", Decl->Ident);
+        if (IsTypeArray (Decl->Type)) {
+            Error ("Array '%s' has unknown size", Decl->Ident);
+        } else {
+            Error ("Variable '%s' has unknown size", Decl->Ident);
+        }
     }
 }
 
@@ -202,8 +207,6 @@ static void ParseAutoDecl (Declaration* Decl)
 
         /* Check for an optional initialization */
         if (CurTok.Tok == TOK_ASSIGN) {
-
-            ExprDesc Expr;
 
             /* Skip the '=' */
             NextToken ();
@@ -241,6 +244,9 @@ static void ParseAutoDecl (Declaration* Decl)
                 g_initauto (InitLabel, Size);
 
             } else {
+
+                ExprDesc Expr;
+                ED_Init (&Expr);
 
                 /* Allocate previously reserved local space */
                 F_AllocLocalSpace (CurrentFunc);
@@ -295,15 +301,13 @@ static void ParseAutoDecl (Declaration* Decl)
         Decl->StorageClass = (Decl->StorageClass & ~SC_AUTO) | SC_STATIC;
 
         /* Generate a label, but don't define it */
-        DataLabel = GetLocalLabel ();
+        DataLabel = GetLocalDataLabel ();
 
         /* Add the symbol to the symbol table. */
         Sym = AddLocalSym (Decl->Ident, Decl->Type, Decl->StorageClass, DataLabel);
 
         /* Allow assignments */
         if (CurTok.Tok == TOK_ASSIGN) {
-
-            ExprDesc Expr;
 
             /* Skip the '=' */
             NextToken ();
@@ -327,6 +331,9 @@ static void ParseAutoDecl (Declaration* Decl)
                 g_initstatic (InitLabel, DataLabel, Size);
 
             } else {
+
+                ExprDesc Expr;
+                ED_Init (&Expr);
 
                 /* Allocate space for the variable */
                 AllocStorage (DataLabel, g_usebss, Size);
@@ -357,7 +364,11 @@ static void ParseAutoDecl (Declaration* Decl)
 
     /* Cannot allocate a variable of zero size */
     if (Size == 0) {
-        Error ("Variable '%s' has unknown size", Decl->Ident);
+        if (IsTypeArray (Decl->Type)) {
+            Error ("Array '%s' has unknown size", Decl->Ident);
+        } else {
+            Error ("Variable '%s' has unknown size", Decl->Ident);
+        }
     }
 }
 
@@ -369,7 +380,7 @@ static void ParseStaticDecl (Declaration* Decl)
     unsigned Size;
 
     /* Generate a label, but don't define it */
-    unsigned DataLabel = GetLocalLabel ();
+    unsigned DataLabel = GetLocalDataLabel ();
 
     /* Add the symbol to the symbol table. */
     SymEntry* Sym = AddLocalSym (Decl->Ident, Decl->Type,
@@ -411,7 +422,11 @@ static void ParseStaticDecl (Declaration* Decl)
 
     /* Cannot allocate a variable of zero size */
     if (Size == 0) {
-        Error ("Variable '%s' has unknown size", Decl->Ident);
+        if (IsTypeArray (Decl->Type)) {
+            Error ("Array '%s' has unknown size", Decl->Ident);
+        } else {
+            Error ("Variable '%s' has unknown size", Decl->Ident);
+        }
     }
 }
 
@@ -427,8 +442,8 @@ static void ParseOneDecl (const DeclSpec* Spec)
     ParseDecl (Spec, &Decl, DM_NEED_IDENT);
 
     /* Check if there are any non-extern storage classes set for function
-    ** declarations. The only valid storage class for function declarations
-    ** inside functions is 'extern'.
+    ** declarations. Function can only be declared inside functions with the
+    ** 'extern' storage class specifier or no storage class specifier at all.
     */
     if ((Decl.StorageClass & SC_FUNC) == SC_FUNC) {
 
@@ -439,12 +454,11 @@ static void ParseOneDecl (const DeclSpec* Spec)
             Error ("Illegal storage class on function");
         }
 
-        /* The default storage class could be wrong. Just use 'extern' in all
-        ** cases.
-        */
+        /* The default storage class could be wrong. Just clear them */
         Decl.StorageClass &= ~SC_STORAGEMASK;
-        Decl.StorageClass |= SC_EXTERN;
 
+        /* This is always a declaration */
+        Decl.StorageClass |= SC_DECL;
     }
 
     /* If we don't have a name, this was flagged as an error earlier.
@@ -456,6 +470,7 @@ static void ParseOneDecl (const DeclSpec* Spec)
 
     /* If the symbol is not marked as external, it will be defined now */
     if ((Decl.StorageClass & SC_FICTITIOUS) == 0 &&
+        (Decl.StorageClass & SC_DECL) == 0  &&
         (Decl.StorageClass & SC_EXTERN) == 0) {
         Decl.StorageClass |= SC_DEF;
     }
@@ -500,8 +515,14 @@ static void ParseOneDecl (const DeclSpec* Spec)
             }
         }
 
-        /* Add the symbol to the symbol table */
-        AddLocalSym (Decl.Ident, Decl.Type, Decl.StorageClass, 0);
+        if ((Decl.StorageClass & SC_EXTERN) == SC_EXTERN ||
+            (Decl.StorageClass & SC_FUNC) == SC_FUNC) {
+            /* Add the global symbol to the local symbol table */
+            AddGlobalSym (Decl.Ident, Decl.Type, Decl.StorageClass);
+        } else {
+            /* Add the local symbol to the local symbol table */
+            AddLocalSym (Decl.Ident, Decl.Type, Decl.StorageClass, 0);
+        }
 
     }
 }
