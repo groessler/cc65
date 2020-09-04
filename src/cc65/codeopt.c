@@ -796,9 +796,6 @@ static OptFunc DOptLoad2        = { OptLoad2,        "OptLoad2",        200, 0, 
 static OptFunc DOptLoad3        = { OptLoad3,        "OptLoad3",          0, 0, 0, 0, 0, 0 };
 static OptFunc DOptNegAX1       = { OptNegAX1,       "OptNegAX1",       165, 0, 0, 0, 0, 0 };
 static OptFunc DOptNegAX2       = { OptNegAX2,       "OptNegAX2",       200, 0, 0, 0, 0, 0 };
-static OptFunc DOptRTS          = { OptRTS,          "OptRTS",          100, 0, 0, 0, 0, 0 };
-static OptFunc DOptRTSJumps1    = { OptRTSJumps1,    "OptRTSJumps1",    100, 0, 0, 0, 0, 0 };
-static OptFunc DOptRTSJumps2    = { OptRTSJumps2,    "OptRTSJumps2",    100, 0, 0, 0, 0, 0 };
 static OptFunc DOptPrecalc      = { OptPrecalc,      "OptPrecalc",      100, 0, 0, 0, 0, 0 };
 static OptFunc DOptPtrLoad1     = { OptPtrLoad1,     "OptPtrLoad1",     100, 0, 0, 0, 0, 0 };
 static OptFunc DOptPtrLoad2     = { OptPtrLoad2,     "OptPtrLoad2",     100, 0, 0, 0, 0, 0 };
@@ -822,6 +819,9 @@ static OptFunc DOptPtrStore3    = { OptPtrStore3,    "OptPtrStore3",    100, 0, 
 static OptFunc DOptPush1        = { OptPush1,        "OptPush1",         65, 0, 0, 0, 0, 0 };
 static OptFunc DOptPush2        = { OptPush2,        "OptPush2",         50, 0, 0, 0, 0, 0 };
 static OptFunc DOptPushPop      = { OptPushPop,      "OptPushPop",        0, 0, 0, 0, 0, 0 };
+static OptFunc DOptRTS          = { OptRTS,          "OptRTS",          100, 0, 0, 0, 0, 0 };
+static OptFunc DOptRTSJumps1    = { OptRTSJumps1,    "OptRTSJumps1",    100, 0, 0, 0, 0, 0 };
+static OptFunc DOptRTSJumps2    = { OptRTSJumps2,    "OptRTSJumps2",    100, 0, 0, 0, 0, 0 };
 static OptFunc DOptShift1       = { OptShift1,       "OptShift1",       100, 0, 0, 0, 0, 0 };
 static OptFunc DOptShift2       = { OptShift2,       "OptShift2",       100, 0, 0, 0, 0, 0 };
 static OptFunc DOptShift3       = { OptShift3,       "OptShift3",        17, 0, 0, 0, 0, 0 };
@@ -1029,7 +1029,9 @@ void ListOptSteps (FILE* F)
     
     fprintf (F, "any\n");
     for (I = 0; I < OPTFUNC_COUNT; ++I) {
-        fprintf (F, "%s\n", OptFuncs[I]->Name);
+        if (OptFuncs[I]->Func != 0) {
+            fprintf (F, "%s\n", OptFuncs[I]->Name);
+        }
     }
 }
 
@@ -1190,10 +1192,10 @@ static unsigned RunOptFunc (CodeSeg* S, OptFunc* F, unsigned Max)
 {
     unsigned Changes, C;
 
-    /* Don't run the function if it is disabled or if it is prohibited by the
+    /* Don't run the function if it is removed, disabled or prohibited by the
     ** code size factor
     */
-    if (F->Disabled || F->CodeSizeFactor > S->CodeSizeFactor) {
+    if (F->Func == 0 || F->Disabled || F->CodeSizeFactor > S->CodeSizeFactor) {
         return 0;
     }
 
@@ -1239,10 +1241,10 @@ static unsigned RunOptGroup1 (CodeSeg* S)
 
     Changes += RunOptFunc (S, &DOptGotoSPAdj, 1);
     Changes += RunOptFunc (S, &DOptStackPtrOps, 5);
+    Changes += RunOptFunc (S, &DOptAdd3, 1);    /* Before OptPtrLoad5! */
     Changes += RunOptFunc (S, &DOptPtrStore1, 1);
     Changes += RunOptFunc (S, &DOptPtrStore2, 1);
     Changes += RunOptFunc (S, &DOptPtrStore3, 1);
-    Changes += RunOptFunc (S, &DOptAdd3, 1);    /* Before OptPtrLoad5! */
     Changes += RunOptFunc (S, &DOptPtrLoad1, 1);
     Changes += RunOptFunc (S, &DOptPtrLoad2, 1);
     Changes += RunOptFunc (S, &DOptPtrLoad3, 1);
@@ -1330,7 +1332,6 @@ static unsigned RunOptGroup3 (CodeSeg* S)
         C += RunOptFunc (S, &DOptAdd6, 1);
         C += RunOptFunc (S, &DOptJumpCascades, 1);
         C += RunOptFunc (S, &DOptDeadJumps, 1);
-        C += RunOptFunc (S, &DOptRTS, 1);
         C += RunOptFunc (S, &DOptDeadCode, 1);
         C += RunOptFunc (S, &DOptBoolTrans, 1);
         C += RunOptFunc (S, &DOptJumpTarget1, 1);
@@ -1485,11 +1486,16 @@ static unsigned RunOptGroup7 (CodeSeg* S)
     /* Adjust branch distances */
     Changes += RunOptFunc (S, &DOptBranchDist, 3);
 
-    /* Replace conditional branches to RTS. If we had changes, we must run dead
-    ** code elimination again, since the change may have introduced dead code.
-    */
+    /* Replace conditional branches to RTS */
     C = RunOptFunc (S, &DOptRTSJumps2, 1);
+
+    /* Replace JSR followed by RTS to JMP */
+    C += RunOptFunc (S, &DOptRTS, 1);
+
     Changes += C;
+    /* If we had changes, we must run dead code elimination again,
+    ** since the changes may have introduced dead code.
+    */
     if (C) {
         Changes += RunOptFunc (S, &DOptDeadCode, 1);
     }

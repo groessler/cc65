@@ -332,7 +332,7 @@ static void WarnConstCompareResult (const ExprDesc* Expr)
 
 
 
-static unsigned FunctionParamList (FuncDesc* Func, int IsFastcall)
+static unsigned FunctionParamList (FuncDesc* Func, int IsFastcall, ExprDesc* ED)
 /* Parse a function parameter list, and pass the arguments to the called
 ** function. Depending on several criteria, this may be done by just pushing
 ** into each parameter separately, or creating the parameter frame once, and
@@ -391,9 +391,10 @@ static unsigned FunctionParamList (FuncDesc* Func, int IsFastcall)
     /* Parse the actual argument list */
     while (CurTok.Tok != TOK_RPAREN) {
 
-        unsigned Flags;
+        unsigned Flags;     /* Code generator flags, not expression flags */
         ExprDesc Expr;
         ED_Init (&Expr);
+        Expr.Flags |= ED->Flags & E_MASK_KEEP_SUBEXPR;
 
         /* Count arguments */
         ++PushedCount;
@@ -609,7 +610,7 @@ static void FunctionCall (ExprDesc* Expr)
     }
 
     /* Parse the parameter list */
-    ParamSize = FunctionParamList (Func, IsFastcall);
+    ParamSize = FunctionParamList (Func, IsFastcall, Expr);
 
     /* We need the closing paren here */
     ConsumeRParen ();
@@ -3223,6 +3224,9 @@ static int hieAnd (ExprDesc* Expr, unsigned* TrueLab, int* TrueLabAllocated)
                 /* Load the value */
                 LoadExpr (CF_FORCECHAR, Expr);
 
+                /* Clear the test flag */
+                ED_RequireNoTest (Expr);
+
                 /* Remember that the jump is used */
                 HasFalseJump = 1;
 
@@ -3355,6 +3359,9 @@ static void hieOr (ExprDesc *Expr)
 
                     /* Get first expr */
                     LoadExpr (CF_FORCECHAR, Expr);
+
+                    /* Clear the test flag */
+                    ED_RequireNoTest (Expr);
 
                     if (HasTrueJump == 0) {
                         /* Get a label that we will use for true expressions */
