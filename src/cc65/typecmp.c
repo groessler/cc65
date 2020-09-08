@@ -203,8 +203,8 @@ static void DoCompare (const Type* lhs, const Type* rhs, typecmp_t* Result)
         if ((IsTypeEnum (lhs) || IsTypeEnum (rhs))) {
 
             /* Compare the tag types */
-            Sym1 = GetESUSymEntry (lhs);
-            Sym2 = GetESUSymEntry (rhs);
+            Sym1 = IsTypeEnum (lhs) ? GetESUSymEntry (lhs) : 0;
+            Sym2 = IsTypeEnum (rhs) ? GetESUSymEntry (rhs) : 0;
 
             if (Sym1 != Sym2) {
                 if (Sym1 == 0 || Sym2 == 0) {
@@ -378,11 +378,13 @@ static void DoCompare (const Type* lhs, const Type* rhs, typecmp_t* Result)
 
                 if (Sym1 != Sym2) {
                     /* Both must be in the same scope and have the same name to
-                    ** be identical. This shouldn't happen in the current code
-                    ** base, but we still do this to be future-proof.
+                    ** be identical.
                     */
                     if (Sym1->Owner != Sym2->Owner ||
                         strcmp (Sym1->Name, Sym2->Name) != 0) {
+                        /* This shouldn't happen in the current code base, but
+                        ** we still handle this case to be future-proof.
+                        */
                         SetResult (Result, TC_INCOMPATIBLE);
                         return;
                     }

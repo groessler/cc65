@@ -593,7 +593,7 @@ static void FunctionCall (ExprDesc* Expr)
         }
 
         /* Check for known standard functions and inline them */
-        if (Expr->Name != 0) {
+        if (Expr->Name != 0 && !ED_IsUneval (Expr)) {
             int StdFunc = FindStdFunc ((const char*) Expr->Name);
             if (StdFunc >= 0) {
                 /* Inline this function */
@@ -923,7 +923,11 @@ static void Primary (ExprDesc* E)
         case TOK_SCONST:
         case TOK_WCSCONST:
             /* String literal */
-            E->LVal  = UseLiteral (CurTok.SVal);
+            if ((Flags & E_EVAL_UNEVAL) != E_EVAL_UNEVAL) {
+                E->LVal = UseLiteral (CurTok.SVal);
+            } else {
+                E->LVal = CurTok.SVal;
+            }
             E->Type  = GetCharArrayType (GetLiteralSize (CurTok.SVal));
             E->Flags = E_LOC_LITERAL | E_RTYPE_RVAL | E_ADDRESS_OF;
             E->IVal  = 0;
@@ -1908,26 +1912,27 @@ void hie10 (ExprDesc* Expr)
 
         case TOK_BOOL_NOT:
             NextToken ();
-            if (evalexpr (CF_NONE, hie10, Expr) == 0) {
+            BoolExpr (hie10, Expr);
+            if (ED_IsConstAbs (Expr)) {
                 /* Constant expression */
                 Expr->IVal = !Expr->IVal;
+            } else if (ED_IsAddrExpr (Expr)) {
+                /* Address != NULL, so !Address == 0 */
+                ED_MakeConstBool (Expr, 0);
             } else {
+                /* Not constant, load into the primary */
+                LoadExpr (CF_NONE, Expr);
                 g_bneg (TypeOf (Expr->Type));
                 ED_FinalizeRValLoad (Expr);
                 ED_TestDone (Expr);             /* bneg will set cc */
             }
+            /* The result type is always boolean */
+            Expr->Type = type_bool;
             break;
 
         case TOK_STAR:
             NextToken ();
             ExprWithCheck (hie10, Expr);
-            if (ED_IsLVal (Expr) || !ED_IsLocQuasiConst (Expr)) {
-                /* Not a const, load the pointer into the primary and make it a
-                ** calculated value.
-                */
-                LoadExpr (CF_NONE, Expr);
-                ED_FinalizeRValLoad (Expr);
-            }
 
             /* If the expression is already a pointer to function, the
             ** additional dereferencing operator must be ignored. A function
@@ -1939,6 +1944,14 @@ void hie10 (ExprDesc* Expr)
                 /* Expression not storable */
                 ED_MarkExprAsRVal (Expr);
             } else {
+                if (!ED_IsQuasiConstAddr (Expr)) {
+                    /* Not a constant address, load the pointer into the primary
+                    ** and make it a calculated value.
+                    */
+                    LoadExpr (CF_NONE, Expr);
+                    ED_FinalizeRValLoad (Expr);
+                }
+
                 if (IsClassPtr (Expr->Type)) {
                     Expr->Type = Indirect (Expr->Type);
                 } else {
@@ -1988,19 +2001,18 @@ void hie10 (ExprDesc* Expr)
                 /* Remember the output queue pointer */
                 CodeMark Mark;
                 GetCodePos (&Mark);
-                hie10 (Expr);
-                if (ED_IsBitField (Expr)) {
+
+                /* The expression shall be unevaluated */
+                ExprDesc Uneval;
+                ED_Init (&Uneval);
+                ED_MarkForUneval (&Uneval);
+                hie10 (&Uneval);
+                if (ED_IsBitField (&Uneval)) {
                     Error ("Cannot apply 'sizeof' to bit-field");
                     Size = 0;
                 } else {
-                    /* If the expression is a literal string, release it, so it
-                    ** won't be output as data if not used elsewhere.
-                    */
-                    if (ED_IsLocLiteral (Expr)) {
-                        ReleaseLiteral (Expr->LVal);
-                    }
                     /* Calculate the size */
-                    Size = ExprCheckedSizeOf (Expr->Type);
+                    Size = ExprCheckedSizeOf (Uneval.Type);
                 }
                 /* Remove any generated code */
                 RemoveCode (&Mark);
@@ -2420,6 +2432,33 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
             */
             WarnConstCompareResult (Expr);
 
+        } else if (ED_CodeRangeIsEmpty (&Expr2) &&
+                   ((ED_IsAddrExpr (Expr) && ED_IsNullPtr (&Expr2)) ||
+                    (ED_IsNullPtr (Expr) && (ED_IsAddrExpr (&Expr2))))) {
+
+            /* Object addresses are inequal to null pointer */
+            Expr->IVal = (Tok != TOK_EQ);
+            if (ED_IsNullPtr (&Expr2)) {
+                if (Tok == TOK_LT || Tok == TOK_LE) {
+                    Expr->IVal = 0;
+                }
+            } else {
+                if (Tok == TOK_GT || Tok == TOK_GE) {
+                    Expr->IVal = 0;
+                }
+            }
+
+            /* Get rid of unwanted flags */
+            ED_MakeConstBool (Expr, Expr->IVal);
+
+            /* If the result is constant, this is suspicious when not in
+            ** preprocessor mode.
+            */
+            WarnConstCompareResult (Expr);
+
+            /* Both operands are static, remove the generated code */
+            RemoveCode (&Mark1);
+
         } else {
 
             /* Determine the signedness of the operands */
@@ -2477,7 +2516,7 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
 
                     case TOK_EQ:
                         if (Expr2.IVal < LeftMin || Expr2.IVal > LeftMax) {
-                            ED_MakeConstAbsInt (Expr, 0);
+                            ED_MakeConstBool (Expr, 0);
                             WarnConstCompareResult (Expr);
                             goto Done;
                         }
@@ -2485,7 +2524,7 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
 
                     case TOK_NE:
                         if (Expr2.IVal < LeftMin || Expr2.IVal > LeftMax) {
-                            ED_MakeConstAbsInt (Expr, 1);
+                            ED_MakeConstBool (Expr, 1);
                             WarnConstCompareResult (Expr);
                             goto Done;
                         }
@@ -2493,7 +2532,7 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
 
                     case TOK_LT:
                         if (Expr2.IVal <= LeftMin || Expr2.IVal > LeftMax) {
-                            ED_MakeConstAbsInt (Expr, Expr2.IVal > LeftMax);
+                            ED_MakeConstBool (Expr, Expr2.IVal > LeftMax);
                             WarnConstCompareResult (Expr);
                             goto Done;
                         }
@@ -2501,7 +2540,7 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
 
                     case TOK_LE:
                         if (Expr2.IVal < LeftMin || Expr2.IVal >= LeftMax) {
-                            ED_MakeConstAbsInt (Expr, Expr2.IVal >= LeftMax);
+                            ED_MakeConstBool (Expr, Expr2.IVal >= LeftMax);
                             WarnConstCompareResult (Expr);
                             goto Done;
                         }
@@ -2509,7 +2548,7 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
 
                     case TOK_GE:
                         if (Expr2.IVal <= LeftMin || Expr2.IVal > LeftMax) {
-                            ED_MakeConstAbsInt (Expr, Expr2.IVal <= LeftMin);
+                            ED_MakeConstBool (Expr, Expr2.IVal <= LeftMin);
                             WarnConstCompareResult (Expr);
                             goto Done;
                         }
@@ -2517,7 +2556,7 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
 
                     case TOK_GT:
                         if (Expr2.IVal < LeftMin || Expr2.IVal >= LeftMax) {
-                            ED_MakeConstAbsInt (Expr, Expr2.IVal < LeftMin);
+                            ED_MakeConstBool (Expr, Expr2.IVal < LeftMin);
                             WarnConstCompareResult (Expr);
                             goto Done;
                         }
@@ -3217,7 +3256,7 @@ static int hieAnd (ExprDesc* Expr, unsigned* TrueLab, int* TrueLabAllocated)
             Error ("Scalar expression expected");
             ED_MakeConstBool (Expr, 0);
         } else if ((Flags & E_EVAL_UNEVAL) != E_EVAL_UNEVAL) {
-            if (!ED_IsConstAbs (Expr)) {
+            if (!ED_IsConstBool (Expr)) {
                 /* Set the test flag */
                 ED_RequireTest (Expr);
 
@@ -3232,7 +3271,7 @@ static int hieAnd (ExprDesc* Expr, unsigned* TrueLab, int* TrueLabAllocated)
 
                 /* Generate the jump */
                 g_falsejump (CF_NONE, FalseLab);
-            } else if (Expr->IVal == 0) {
+            } else if (Expr->IVal == 0 && !ED_IsAddrExpr (Expr)) {
                 /* Skip remaining */
                 Flags |= E_EVAL_UNEVAL;
             }
@@ -3259,7 +3298,7 @@ static int hieAnd (ExprDesc* Expr, unsigned* TrueLab, int* TrueLabAllocated)
                 Error ("Scalar expression expected");
                 ED_MakeConstBool (&Expr2, 0);
             } else if ((Flags & E_EVAL_UNEVAL) != E_EVAL_UNEVAL) {
-                if (!ED_IsConstAbs (&Expr2)) {
+                if (!ED_IsConstBool (&Expr2)) {
                     ED_RequireTest (&Expr2);
                     LoadExpr (CF_FORCECHAR, &Expr2);
 
@@ -3271,7 +3310,7 @@ static int hieAnd (ExprDesc* Expr, unsigned* TrueLab, int* TrueLabAllocated)
                         /* We need the true label for the last expression */
                         HasTrueJump = 1;
                     }
-                } else if (Expr2.IVal == 0) {
+                } else if (Expr2.IVal == 0 && !ED_IsAddrExpr (&Expr2)) {
                     /* Skip remaining */
                     Flags |= E_EVAL_UNEVAL;
                     /* The value of the expression will be false */
@@ -3308,7 +3347,8 @@ static int hieAnd (ExprDesc* Expr, unsigned* TrueLab, int* TrueLabAllocated)
         }
 
         /* Convert to bool */
-        if (ED_IsConstAbs (Expr) && Expr->IVal != 0) {
+        if ((ED_IsConstAbs (Expr) && Expr->IVal != 0) ||
+            ED_IsAddrExpr (Expr)) {
             ED_MakeConstBool (Expr, 1);
         } else {
             Expr->Type = type_bool;
@@ -3349,7 +3389,7 @@ static void hieOr (ExprDesc *Expr)
             ED_MakeConstBool (Expr, 0);
         } else if ((Flags & E_EVAL_UNEVAL) != E_EVAL_UNEVAL) {
  
-            if (!ED_IsConstAbs (Expr)) {
+            if (!ED_IsConstBool (Expr)) {
                 /* Test the lhs if we haven't had && operators. If we had them, the
                 ** jump is already in place and there's no need to do the test.
                 */
@@ -3372,7 +3412,7 @@ static void hieOr (ExprDesc *Expr)
                     /* Jump to TrueLab if true */
                     g_truejump (CF_NONE, TrueLab);
                 }
-            } else if (Expr->IVal != 0) {
+            } else if (Expr->IVal != 0 || ED_IsAddrExpr (Expr)) {
                 /* Skip remaining */
                 Flags |= E_EVAL_UNEVAL;
             }
@@ -3401,7 +3441,7 @@ static void hieOr (ExprDesc *Expr)
                 ED_MakeConstBool (&Expr2, 0);
             } else if ((Flags & E_EVAL_UNEVAL) != E_EVAL_UNEVAL) {
 
-                if (!ED_IsConstAbs (&Expr2)) {
+                if (!ED_IsConstBool (&Expr2)) {
                     /* If there is more to come, add shortcut boolean eval */
                     if (!AndOp) {
                         ED_RequireTest (&Expr2);
@@ -3413,7 +3453,7 @@ static void hieOr (ExprDesc *Expr)
                         }
                         g_truejump (CF_NONE, TrueLab);
                     }
-                } else if (Expr2.IVal != 0) {
+                } else if (Expr2.IVal != 0 || ED_IsAddrExpr (&Expr2)) {
                     /* Skip remaining */
                     Flags |= E_EVAL_UNEVAL;
                     /* The result is always true */
@@ -3424,7 +3464,8 @@ static void hieOr (ExprDesc *Expr)
         }
 
         /* Convert to bool */
-        if (ED_IsConstAbs (Expr) && Expr->IVal != 0) {
+        if ((ED_IsConstAbs (Expr) && Expr->IVal != 0) ||
+            ED_IsAddrExpr (Expr)) {
             ED_MakeConstBool (Expr, 1);
         } else {
             Expr->Type = type_bool;
@@ -3478,7 +3519,7 @@ static void hieQuest (ExprDesc* Expr)
     /* Check if it's a ternary expression */
     if (CurTok.Tok == TOK_QUEST) {
 
-        int ConstantCond = ED_IsConstAbsInt (Expr);
+        int ConstantCond = ED_IsConstBool (Expr);
         unsigned Flags   = Expr->Flags & E_MASK_KEEP_RESULT;
 
         ED_Init (&Expr2);
@@ -3487,6 +3528,11 @@ static void hieQuest (ExprDesc* Expr)
         Expr3.Flags = Flags;
 
         NextToken ();
+
+        /* Convert non-integer constant boolean */
+        if (ED_IsAddrExpr (Expr)) {
+            ED_MakeConstBool (Expr, 1);
+        }
 
         if (!ConstantCond) {
             /* Condition codes not set, request a test */
@@ -3976,29 +4022,6 @@ void hie0 (ExprDesc *Expr)
         Expr->Flags = Flags;
         NextToken ();
         hie1 (Expr);
-    }
-}
-
-
-
-int evalexpr (unsigned Flags, void (*Func) (ExprDesc*), ExprDesc* Expr)
-/* Will evaluate an expression via the given function. If the result is a
-** constant, 0 is returned and the value is put in the Expr struct. If the
-** result is not constant, LoadExpr is called to bring the value into the
-** primary register and 1 is returned.
-*/
-{
-    /* Evaluate */
-    ExprWithCheck (Func, Expr);
-
-    /* Check for a constant expression */
-    if (ED_IsConstAbs (Expr)) {
-        /* Constant expression */
-        return 0;
-    } else {
-        /* Not constant, load into the primary */
-        LoadExpr (Flags, Expr);
-        return 1;
     }
 }
 

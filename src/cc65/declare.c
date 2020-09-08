@@ -764,9 +764,9 @@ static int ParseFieldWidth (Declaration* Decl)
     /* TODO: This can be relaxed to be any integral type, but
     ** ParseStructInit currently only supports up to int.
     */
-    if (SizeOf (Decl->Type) != SizeOf (type_uint)) {
-        /* Only int sized types may be used for bit-fields for now */
-        Error ("cc65 currently only supports unsigned int bit-fields");
+    if (SizeOf (Decl->Type) > SizeOf (type_uint)) {
+        /* Only int-sized or smaller types may be used for bit-fields for now */
+        Error ("cc65 currently only supports char-sized and int-sized bit-fields");
         return -1;
     }
 
@@ -1446,6 +1446,12 @@ static void ParseTypeSpec (DeclSpec* D, long Default, TypeCode Qualifiers,
             D->Type[0].C |= T_ENUM;
             SetESUSymEntry (D->Type, Entry);
             D->Type[1].C = T_END;
+            /* The signedness of enums is determined by the type, so say this is specified to avoid
+            ** the int -> unsigned int handling for plain int bit-fields in AddBitField.
+            */
+            if (SignednessSpecified) {
+                *SignednessSpecified = 1;
+            }
             break;
 
         case TOK_IDENT:

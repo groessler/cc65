@@ -1,15 +1,15 @@
 /*****************************************************************************/
 /*                                                                           */
-/*                                inttypes.h                                 */
+/*                                codemisc.h                                 */
 /*                                                                           */
-/*                           Define integer types                            */
+/*                   Miscellaneous optimization operations                   */
 /*                                                                           */
 /*                                                                           */
 /*                                                                           */
-/* (C) 2004      Ullrich von Bassewitz                                       */
-/*               Roemerstrasse 52                                            */
-/*               D-70794 Filderstadt                                         */
-/* EMail:        uz@cc65.org                                                 */
+/* (C) 2001-2012, Ullrich von Bassewitz                                      */
+/*                Roemerstrasse 52                                           */
+/*                D-70794 Filderstadt                                        */
+/* EMail:         uz@cc65.org                                                */
 /*                                                                           */
 /*                                                                           */
 /* This software is provided 'as-is', without any expressed or implied       */
@@ -33,44 +33,81 @@
 
 
 
-#ifndef INTTYPES_H
-#define INTTYPES_H
+#ifndef COPTMISC_H
+#define COPTMISC_H
 
 
 
-/* If we have <stdint.h>, include it; otherwise, adapt types from <stddef.h>
-** and define integer boundary constants.
-** gcc and msvc don't define __STDC_VERSION__ without special flags, so check
-** for them explicitly.  Undefined symbols are replaced by zero; so, checks for
-** defined(__GNUC__) and defined(_MSC_VER) aren't necessary.
+/* cc65 */
+#include "codeseg.h"
+
+
+
+/*****************************************************************************/
+/*                                   Code                                    */
+/*****************************************************************************/
+
+
+
+unsigned OptDecouple (CodeSeg* S);
+/* Decouple operations, that is, do the following replacements:
+**
+**   dex        -> ldx #imm
+**   inx        -> ldx #imm
+**   dey        -> ldy #imm
+**   iny        -> ldy #imm
+**   tax        -> ldx #imm
+**   txa        -> lda #imm
+**   tay        -> ldy #imm
+**   tya        -> lda #imm
+**   lda zp     -> lda #imm
+**   ldx zp     -> ldx #imm
+**   ldy zp     -> ldy #imm
+**
+** Provided that the register values are known of course.
 */
-#if (__STDC_VERSION__ >= 199901) || (__GNUC__ >= 3) || (_MSC_VER >= 1600)
-#include <stdint.h>
-#else
 
-/* Assume that ptrdiff_t and size_t are wide enough to hold pointers.
-** Assume that they are the widest type.
+unsigned OptIndLoads1 (CodeSeg* S);
+/* Change
+**
+**     lda      (zp),y
+**
+** into
+**
+**     lda      (zp,x)
+**
+** provided that x and y are both zero.
 */
-#include <stddef.h>
 
-typedef ptrdiff_t intptr_t;
-typedef size_t uintptr_t;
-typedef ptrdiff_t intmax_t;
-typedef size_t uintmax_t;
+unsigned OptIndLoads2 (CodeSeg* S);
+/* Change
+**
+**     lda      (zp,x)
+**
+** into
+**
+**     lda      (zp),y
+**
+** provided that x and y are both zero.
+*/
 
-#define INT8_MAX (0x7F)
-#define INT16_MAX (0x7FFF)
-#define INT32_MAX (0x7FFFFFFF)
+unsigned OptStackPtrOps (CodeSeg* S);
+/* Merge adjacent calls to decsp into one. NOTE: This function won't merge all
+** known cases!
+*/
 
-#define INT8_MIN (-INT8_MAX - 1)
-#define INT16_MIN (-INT16_MAX - 1)
+unsigned OptGotoSPAdj (CodeSeg* S);
+/* Optimize SP adjustment for forward 'goto' */
 
-#define UINT8_MAX (0xFF)
-#define UINT16_MAX (0xFFFF)
+unsigned OptLoad1 (CodeSeg* S);
+/* Search for a call to ldaxysp where X is not used later and replace it by
+** a load of just the A register.
+*/
 
-#endif
+unsigned OptLoad2 (CodeSeg* S);
+/* Replace calls to ldaxysp by inline code */
 
 
+/* End of coptmisc.h */
 
-/* End of inttypes.h */
 #endif
