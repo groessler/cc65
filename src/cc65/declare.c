@@ -744,7 +744,7 @@ static SymEntry* ParseEnumDecl (const char* Name, unsigned* DSFlags)
 
 
 
-static int ParseFieldWidth (Declaration* Decl)
+static int ParseFieldWidth (Declaration* D)
 /* Parse an optional field width. Returns -1 if no field width is specified,
 ** otherwise the width of the field.
 */
@@ -754,20 +754,26 @@ static int ParseFieldWidth (Declaration* Decl)
         return -1;
     }
 
-    if (!IsClassInt (Decl->Type)) {
+    if (!IsClassInt (D->Type)) {
         /* Only integer types may be used for bit-fields */
         Error ("Bit-field has invalid type '%s', must be integral",
-               GetBasicTypeName (Decl->Type));
-        return -1;
+               GetBasicTypeName (D->Type));
+
+        /* Avoid a diagnostic storm by giving the bit-field the widest valid
+        ** signed type, and continuing to parse.
+        */
+        D->Type[0].C = T_INT;
     }
 
     /* TODO: This can be relaxed to be any integral type, but
-    ** ParseStructInit currently only supports up to int.
+    ** ParseStructInit currently supports only up to int.
     */
-    if (SizeOf (Decl->Type) > SizeOf (type_uint)) {
-        /* Only int-sized or smaller types may be used for bit-fields for now */
-        Error ("cc65 currently only supports char-sized and int-sized bit-fields");
-        return -1;
+    if (SizeOf (D->Type) > SizeOf (type_uint)) {
+        /* Only int-sized or smaller types may be used for bit-fields, for now */
+        Error ("cc65 currently supports only char-sized and int-sized bit-field types");
+
+        /* Avoid a diagnostic storm */
+        D->Type[0].C = T_INT;
     }
 
     /* Read the width */
@@ -778,11 +784,11 @@ static int ParseFieldWidth (Declaration* Decl)
         Error ("Negative width in bit-field");
         return -1;
     }
-    if (Expr.IVal > (long)(SizeOf (Decl->Type) * CHAR_BITS)) {
+    if (Expr.IVal > (long)(SizeOf (D->Type) * CHAR_BITS)) {
         Error ("Width of bit-field exceeds its type");
         return -1;
     }
-    if (Expr.IVal == 0 && Decl->Ident[0] != '\0') {
+    if (Expr.IVal == 0 && D->Ident[0] != '\0') {
         Error ("Zero width for named bit-field");
         return -1;
     }
@@ -818,7 +824,7 @@ static unsigned PadWithBitField (unsigned StructSize, unsigned BitOffs)
 
 
 
-static unsigned AliasAnonStructFields (const Declaration* Decl, SymEntry* Anon)
+static unsigned AliasAnonStructFields (const Declaration* D, SymEntry* Anon)
 /* Create alias fields from an anon union/struct in the current lexical level.
 ** The function returns the count of created aliases.
 */
@@ -827,7 +833,7 @@ static unsigned AliasAnonStructFields (const Declaration* Decl, SymEntry* Anon)
     SymEntry* Alias;
 
     /* Get the pointer to the symbol table entry of the anon struct */
-    SymEntry* Entry = GetESUSymEntry (Decl->Type);
+    SymEntry* Entry = GetESUSymEntry (D->Type);
 
     /* Get the symbol table containing the fields. If it is empty, there has
     ** been an error before, so bail out.
@@ -1462,6 +1468,15 @@ static void ParseTypeSpec (DeclSpec* D, long Default, TypeCode Qualifiers,
                     /* It's a typedef */
                     NextToken ();
                     TypeCopy (D->Type, Entry->Type);
+                    /* If it's a typedef, we should actually use whether the signedness was
+                    ** specified on the typedef, but that information has been lost.  Treat the
+                    ** signedness as being specified to work around the ICE in #1267.
+                    ** Unforunately, this will cause plain int bit-fields defined via typedefs
+                    ** to be treated as signed rather than unsigned.
+                    */
+                    if (SignednessSpecified) {
+                        *SignednessSpecified = 1;
+                    }
                     break;
                 }
             } else {
@@ -2287,6 +2302,9 @@ static unsigned ParseScalarInit (Type* T)
     /* Output the data */
     DefineData (&ED);
 
+    /* Do this anyways for safety */
+    DoDeferred (SQP_KEEP_NONE, &ED);
+
     /* Done */
     return SizeOf (T);
 }
@@ -2305,6 +2323,9 @@ static unsigned ParsePointerInit (Type* T)
 
     /* Output the data */
     DefineData (&ED);
+
+    /* Do this anyways for safety */
+    DoDeferred (SQP_KEEP_NONE, &ED);
 
     /* Close eventually opening braces */
     ClosingCurlyBraces (BraceCount);
@@ -2561,9 +2582,9 @@ static unsigned ParseStructInit (Type* T, int* Braces, int AllowFlexibleMembers)
                 long RestoredVal = asr_l(asl_l (Val, ShiftBits), ShiftBits);
                 if (ED.IVal != RestoredVal) {
                     Warning ("Implicit truncation from '%s' to '%s : %u' in bit-field initializer "
-                             "changes value from %ld to %d",
+                             "changes value from %ld to %ld",
                              GetFullTypeName (ED.Type), GetFullTypeName (Entry->Type),
-                             Entry->V.B.BitWidth, ED.IVal, Val);
+                             Entry->V.B.BitWidth, ED.IVal, RestoredVal);
                 }
             }
 

@@ -39,6 +39,7 @@
 #include <stdarg.h>
 
 /* common */
+#include "addrsize.h"
 #include "check.h"
 #include "cpu.h"
 #include "inttypes.h"
@@ -260,6 +261,9 @@ void g_usebss (void)
 void g_segname (segment_t Seg)
 /* Emit the name of a segment if necessary */
 {
+    unsigned char AddrSize;
+    const char* Name;
+
     /* Emit a segment directive for the data style segments */
     DataSeg* S;
     switch (Seg) {
@@ -269,7 +273,13 @@ void g_segname (segment_t Seg)
         default:         S = 0;          break;
     }
     if (S) {
-        DS_AddLine (S, ".segment\t\"%s\"", GetSegName (Seg));
+        Name = GetSegName (Seg);
+        AddrSize = GetSegAddrSize (Name);
+        if (AddrSize != ADDR_SIZE_INVALID) {
+            DS_AddLine (S, ".segment\t\"%s\": %s", Name, AddrSizeToStr (AddrSize));
+        } else {
+            DS_AddLine (S, ".segment\t\"%s\"", Name);
+        }
     }
 }
 
@@ -2447,6 +2457,8 @@ void g_falsejump (unsigned flags attribute ((unused)), unsigned label)
 void g_branch (unsigned Label)
 /* Branch unconditionally to Label if the CPU has the BRA instruction.
 ** Otherwise, jump to Label.
+** Use this function, instead of g_jump(), only where it is certain that
+** the label cannot be farther away from the branch than -128/+127 bytes.
 */
 {
     if ((CPUIsets[CPU] & CPU_ISET_65SC02) != 0) {
@@ -4509,8 +4521,8 @@ void g_extractbitfield (unsigned Flags, unsigned FullWidthFlags, int IsSigned,
 
     /* Handle signed bit-fields. */
     if (IsSigned) {
-        /* Push A, since the sign bit test will destroy it. */
-        AddCodeLine ("pha");
+        /* Save .A because the sign-bit test will destroy it. */
+        AddCodeLine ("tay");
 
         /* Check sign bit */
         unsigned SignBitPos = BitWidth - 1U;
@@ -4518,7 +4530,7 @@ void g_extractbitfield (unsigned Flags, unsigned FullWidthFlags, int IsSigned,
         unsigned SignBitPosInByte = SignBitPos % CHAR_BITS;
         unsigned SignBitMask = 1U << SignBitPosInByte;
 
-        /* Move the correct byte to A.  This can only be X for now,
+        /* Move the correct byte to .A.  This can be only .X for now,
         ** but more cases will be needed to support long.
         */
         switch (SignBitByte) {
@@ -4536,20 +4548,24 @@ void g_extractbitfield (unsigned Flags, unsigned FullWidthFlags, int IsSigned,
         unsigned ZeroExtendLabel = GetLocalLabel ();
         AddCodeLine ("beq %s", LocalLabelName (ZeroExtendLabel));
 
-        /* Pop A back and sign-extend if required; operating on the full result needs
-        ** to sign-extend into high byte, too.
+        /* Get back .A and sign-extend if required; operating on the full result needs
+        ** to sign-extend into the high byte, too.
         */
-        AddCodeLine ("pla");
+        AddCodeLine ("tya");
         g_or (FullWidthFlags | CF_CONST, ~Mask);
 
+        /* We can generate a branch, instead of a jump, here because we know
+        ** that only a few instructions will be put between here and where
+        ** DoneLabel will be defined.
+        */
         unsigned DoneLabel = GetLocalLabel ();
         g_branch (DoneLabel);
 
-        /* Pop A back, then zero-extend. We need to duplicate the PLA, rather than move it before
-        ** the branch to share with the other label, because PLA changes some condition codes.
+        /* Get back .A, then zero-extend. We need to duplicate the TYA, rather than move it before
+        ** the branch to share with the other label, because TYA changes some condition codes.
         */
         g_defcodelabel (ZeroExtendLabel);
-        AddCodeLine ("pla");
+        AddCodeLine ("tya");
 
         /* Zero the upper bits, the same as the unsigned path. */
         if (ZeroExtendMask != 0) {

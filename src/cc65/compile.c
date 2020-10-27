@@ -37,6 +37,7 @@
 #include <time.h>
 
 /* common */
+#include "addrsize.h"
 #include "debugflag.h"
 #include "segnames.h"
 #include "version.h"
@@ -275,6 +276,17 @@ static void Parse (void)
                         }
                         Entry->V.BssName = xstrdup (bssName);
 
+                        /* This is to make the automatical zeropage setting of the symbol
+                        ** work right.
+                        */
+                        g_usebss ();
+                    }
+                }
+
+                /* Make the symbol zeropage according to the segment address size */
+                if ((Entry->Flags & SC_EXTERN) != 0) {
+                    if (GetSegAddrSize (GetSegName (CS->CurDSeg)) == ADDR_SIZE_ZP) {
+                        Entry->Flags |= SC_ZEROPAGE;
                         /* Check for enum forward declaration.
                         ** Warn about it when extensions are not allowed.
                         */
@@ -308,6 +320,9 @@ static void Parse (void)
                 } else {
                     /* Parse the function body */
                     NewFunc (Entry, FuncDef);
+
+                    /* Make sure we aren't omitting any work */
+                    CheckDeferredOpAllDone ();
                 }
             }
 
@@ -383,11 +398,19 @@ void Compile (const char* FileName)
     /* DefineNumericMacro ("__STDC__", 1);      <- not now */
     DefineNumericMacro ("__STDC_HOSTED__", 1);
 
+    InitDeferredOps ();
+
     /* Create the base lexical level */
     EnterGlobalLevel ();
 
     /* Create the global code and data segments */
     CreateGlobalSegments ();
+
+    /* There shouldn't be needs for local labels outside a function, but the
+    ** current code generator still tries to get some at times even though the
+    ** code were ill-formed. So just set it up with the global segment list.
+    */
+    UseLabelPoolFromSegments (GS);
 
     /* Initialize the literal pool */
     InitLiteralPool ();
@@ -468,6 +491,8 @@ void Compile (const char* FileName)
         }
     }
 
+    DoneDeferredOps ();
+
     if (Debug) {
         PrintMacroStats (stdout);
     }
@@ -488,6 +513,9 @@ void FinishCompile (void)
     */
     for (Entry = GetGlobalSymTab ()->SymHead; Entry; Entry = Entry->NextSym) {
         if (SymIsOutputFunc (Entry)) {
+            /* Continue with previous label numbers */
+            UseLabelPoolFromSegments (Entry->V.F.Seg);
+
             /* Function which is defined and referenced or extern */
             MoveLiteralPool (Entry->V.F.LitPool);
             CS_MergeLabels (Entry->V.F.Seg->Code);

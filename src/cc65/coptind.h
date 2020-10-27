@@ -82,12 +82,45 @@ unsigned OptTransfers4 (CodeSeg* S);
 ** by a load of the second register if possible.
 */
 
-unsigned OptPushPop (CodeSeg* S);
-/* Remove a PHA/PLA sequence were A is not used later */
+unsigned OptPushPop1 (CodeSeg* S);
+/* Remove a PHA/PLA sequence were A not used later */
+
+unsigned OptPushPop2 (CodeSeg* S);
+/* Remove a PHP/PLP sequence were no processor flags changed inside */
 
 unsigned OptPrecalc (CodeSeg* S);
 /* Replace immediate operations with the accu where the current contents are
 ** known by a load of the final value.
+*/
+
+unsigned OptShiftBack (CodeSeg* S);
+/* Remove a pair of shifts to the opposite directions if none of the bits of
+** the register A or the Z/N flags modified by these shifts are used later.
+*/
+
+unsigned OptSignExtended (CodeSeg* S);
+/* Change
+**
+**      lda     xxx     ; X is 0
+**      bpl     L1
+**      dex/ldx #$FF
+**  L1: cpx     #$00
+**      bpl     L2
+**
+** or
+**
+**      lda     xxx     ; X is 0
+**      bpl     L1
+**      dex/ldx #$FF
+**  L1: cpx     #$80
+**      bcc/bmi L2
+**
+** into
+**      lda     xxx     ; X is 0
+**      bpl     L2
+**      dex/ldx #$FF
+**
+** provided the C flag isn't used later.
 */
 
 

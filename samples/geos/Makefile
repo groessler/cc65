@@ -26,18 +26,27 @@ ifdef CC65_HOME
   LD = $(CC65_HOME)/bin/ld65
   SP = $(CC65_HOME)/bin/sp65
 else
-  AS := $(if $(wildcard ../bin/ca65*),../bin/ca65,ca65)
-  CC := $(if $(wildcard ../bin/cc65*),../bin/cc65,cc65)
-  CL := $(if $(wildcard ../bin/cl65*),../bin/cl65,cl65)
-  LD := $(if $(wildcard ../bin/ld65*),../bin/ld65,ld65)
-  SP := $(if $(wildcard ../bin/sp65*),../bin/sp65,sp65)
+  AS := $(if $(wildcard ../../bin/ca65*),../../bin/ca65,ca65)
+  CC := $(if $(wildcard ../../bin/cc65*),../../bin/cc65,cc65)
+  CL := $(if $(wildcard ../../bin/cl65*),../../bin/cl65,cl65)
+  LD := $(if $(wildcard ../../bin/ld65*),../../bin/ld65,ld65)
+  SP := $(if $(wildcard ../../bin/sp65*),../../bin/sp65,sp65)
 endif 
+
+DIRLIST = grc
+
+define SUBDIR_recipe
+
+@$(MAKE) -C $(dir) --no-print-directory $@
+
+endef # SUBDIR_recipe
 
 # omitted: dialog.c grphstr.c inittab.c menu.c
 
 # TODO: geosconio.cvt rmvprot.cvt
-all: bitmap-demo.cvt filesel.cvt geosver.cvt getid.cvt hello1.cvt hello2.cvt \
+samples: bitmap-demo.cvt filesel.cvt geosver.cvt getid.cvt hello1.cvt hello2.cvt \
 	overlay-demo.cvt vector-demo.cvt yesno.cvt
+	$(foreach dir,$(DIRLIST),$(SUBDIR_recipe))
 
 bitmap.c: logo.pcx
 	$(SP) -r logo.pcx -c geos-bitmap -w bitmap.c,ident=bitmap
@@ -77,6 +86,8 @@ yesno.cvt: yesnores.grc yesno.c
 
 	
 clean:
-	$(RM) bitmap.c
-	$(RM) *.cvt
-	$(RM) *.map
+	@$(DEL) overlay-demores.h 2>$(NULLDEV)
+	@$(DEL) bitmap.c 2>$(NULLDEV)
+	@$(DEL) *.cvt 2>$(NULLDEV)
+	@$(DEL) *.map 2>$(NULLDEV)
+	$(foreach dir,$(DIRLIST),$(SUBDIR_recipe))

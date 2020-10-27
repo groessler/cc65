@@ -672,7 +672,7 @@ unsigned OptTransfers2 (CodeSeg* S)
             (N = CS_GetNextEntry (S, I)) != 0       &&
             !CE_HasLabel (N)                        &&
             (N->Info & OF_XFR) != 0                 &&
-            (GetRegInfo (S, I+2, E->Chg) & E->Chg) == 0) {
+            (GetRegInfo (S, I+2, E->Chg & REG_ALL) & E->Chg & REG_ALL) == 0) {
 
             CodeEntry* X = 0;
 
@@ -796,7 +796,7 @@ unsigned OptTransfers3 (CodeSeg* S)
                     }
 
                 /* Does this insn change the target register of the transfer? */
-                } else if (E->Chg & XferEntry->Chg) {
+                } else if (E->Chg & XferEntry->Chg & ~PSTATE_ZN) {
 
                     /* We *may* add code here to remove the transfer, but I'm
                     ** currently not sure about the consequences, so I won't
@@ -823,8 +823,9 @@ unsigned OptTransfers3 (CodeSeg* S)
                 ** isn't used later, and we have an address mode match, we can
                 ** replace the transfer by a store and remove the store here.
                 */
-                if ((GetRegInfo (S, I, XferEntry->Chg) & XferEntry->Chg) == 0   &&
-                    (StoreEntry->AM == AM65_ABS         ||
+                if ((GetRegInfo (S, I, XferEntry->Chg & REG_ALL) &
+                    XferEntry->Chg & REG_ALL) == 0                              &&
+                    (StoreEntry->AM == AM65_ABS ||
                      StoreEntry->AM == AM65_ZP)                                 &&
                     (StoreEntry->AM != AM65_ZP ||
                      (StoreEntry->Chg & UsedRegs) == 0)                         &&
@@ -973,7 +974,7 @@ unsigned OptTransfers4 (CodeSeg* S)
                     }
 
                 /* Does this insn change the target register of the load? */
-                } else if (E->Chg & LoadEntry->Chg) {
+                } else if (E->Chg & LoadEntry->Chg & ~PSTATE_ZN) {
 
                     /* We *may* add code here to remove the load, but I'm
                     ** currently not sure about the consequences, so I won't
@@ -989,9 +990,10 @@ unsigned OptTransfers4 (CodeSeg* S)
                 ** isn't used later, and we have an address mode match, we can
                 ** replace the transfer by a load and remove the initial load.
                 */
-                if ((GetRegInfo (S, I, LoadEntry->Chg) & LoadEntry->Chg) == 0   &&
-                    (LoadEntry->AM == AM65_ABS          ||
-                     LoadEntry->AM == AM65_ZP           ||
+                if ((GetRegInfo (S, I, LoadEntry->Chg & REG_ALL) & 
+                    LoadEntry->Chg & REG_ALL) == 0                              &&
+                    (LoadEntry->AM == AM65_ABS ||
+                     LoadEntry->AM == AM65_ZP  ||
                      LoadEntry->AM == AM65_IMM)                                 &&
                     !MemAccess (S, Load+1, Xfer-1, LoadEntry)) {
 
@@ -1067,8 +1069,8 @@ unsigned OptTransfers4 (CodeSeg* S)
 
 
 
-unsigned OptPushPop (CodeSeg* S)
-/* Remove a PHA/PLA sequence were A is not used later */
+unsigned OptPushPop1 (CodeSeg* S)
+/* Remove a PHA/PLA sequence were A not used later */
 {
     unsigned Changes = 0;
     unsigned Push    = 0;       /* Index of push insn */
@@ -1197,6 +1199,95 @@ unsigned OptPushPop (CodeSeg* S)
 
 
 
+unsigned OptPushPop2 (CodeSeg* S)
+/* Remove a PHP/PLP sequence were no processor flags changed inside */
+{
+    unsigned Changes = 0;
+    unsigned Push    = 0;       /* Index of push insn */
+    unsigned Pop     = 0;       /* Index of pop insn */
+    enum {
+        Searching,
+        FoundPush,
+        FoundPop
+    } State = Searching;
+
+    /* Walk over the entries. Look for a push instruction that is followed by
+    ** a pop later, where the pop is not followed by an conditional branch,
+    ** and where the value of the A register is not used later on.
+    ** Look out for the following problems:
+    **
+    **  - There may be another PHP/PLP inside the sequence: Restart it.
+    **  - All jumps inside the sequence must not go outside the sequence,
+    **    otherwise it would be too complicated to remove the PHP/PLP.
+    */
+    unsigned I = 0;
+    while (I < CS_GetEntryCount (S)) {
+
+        /* Get next entry */
+        CodeEntry* E = CS_GetEntry (S, I);
+
+        switch (State) {
+
+            case Searching:
+                if (E->OPC == OP65_PHP) {
+                    /* Found start of sequence */
+                    Push  = I;
+                    State = FoundPush;
+                }
+                break;
+
+            case FoundPush:
+                if (E->OPC == OP65_PHP) {
+                    /* Inner push/pop, restart */
+                    Push = I;
+                } else if (E->OPC == OP65_PLP) {
+                    /* Found a matching pop */
+                    Pop = I;
+                    /* Check that the block between Push and Pop is a basic
+                    ** block (one entry, one exit). Otherwise ignore it.
+                    */
+                    if (CS_IsBasicBlock (S, Push, Pop)) {
+                        State = FoundPop;
+                    } else {
+                        /* Go into searching mode again */
+                        State = Searching;
+                    }
+                } else if ((E->Info & OF_BRA)   == 0 && 
+                           (E->Info & OF_STORE) == 0 &&
+                           E->OPC != OP65_NOP        &&
+                           E->OPC != OP65_TSX) {
+                    /* Don't bother skipping dead code */
+                    State = Searching;
+                }
+                break;
+
+            case FoundPop:
+                /* We can remove the PHP and PLP instructions */
+                CS_DelEntry (S, Pop);
+                CS_DelEntry (S, Push);
+
+                /* Correct I so we continue with THIS insn */
+                I -= 3;
+
+                /* Remember we had changes */
+                ++Changes;
+
+                /* Go into search mode again */
+                State = Searching;
+                break;
+
+        }
+
+        /* Next entry */
+        ++I;
+    }
+
+    /* Return the number of changes made */
+    return Changes;
+}
+
+
+
 unsigned OptPrecalc (CodeSeg* S)
 /* Replace immediate operations with the accu where the current contents are
 ** known by a load of the final value.
@@ -1246,36 +1337,70 @@ unsigned OptPrecalc (CodeSeg* S)
                 }
                 break;
 
-            case OP65_EOR:
-                if (RegValIsKnown (Out->RegA)) {
-                    /* Accu op zp with known contents */
-                    Arg = MakeHexArg (Out->RegA);
-                }
-                break;
-
             case OP65_ADC:
             case OP65_SBC:
-                /* If this is an operation with an immediate operand of zero,
-                ** and the register is zero, the operation won't give us any
-                ** results we don't already have (including the flags), so
-                ** remove it. Something like this is generated as a result of
-                ** a compare where parts of the values are known to be zero.
-                ** The only situation where we need to leave things as they are
-                ** is when V flag is being tested in the next instruction,
-                ** because ADC/SBC #0 always clears it.
-                */
-                if (In->RegA == 0 && CE_IsKnownImm (E, 0x00) &&
-                    (E = CS_GetEntry (S, I + 1))             &&
-                    E->OPC != OP65_BVC                       &&
-                    E->OPC != OP65_BVS ) {
-                    /* 0-0 or 0+0 -> remove */
-                    CS_DelEntry (S, I);
-                    ++Changes;
+                if (CE_IsKnownImm (E, 0x00)) {
+                    /* If this is an operation with an immediate operand of zero,
+                    ** and the Z/N flags reflect the current states of the content
+                    ** in A, then the operation won't give us any results we don't
+                    ** already have (including the flags) as long as the C flag is
+                    ** set normally (cleared for ADC and set for SBC) for the
+                    ** operation. So we can remove the operation if it is the
+                    ** normal case or the result in A is not used later.
+                    ** Something like this is generated as a result of a compare
+                    ** where parts of the values are known to be zero.
+                    ** The only situation where we need to leave things as they
+                    ** are is when an indeterminate V flag is being tested later,
+                    ** because ADC/SBC #0 always clears it.
+                    */
+                    int CondC = PStatesAreKnown (In->PFlags, PSTATE_C) &&
+                                ((E->OPC == OP65_ADC && (In->PFlags & PFVAL_C) == 0) ||
+                                 (E->OPC == OP65_SBC && (In->PFlags & PFVAL_C) != 0));
+                    int CondV = PStatesAreKnown (In->PFlags, PSTATE_V) && (In->PFlags & PFVAL_V) == 0;
+                    int CondZN = (In->ZNRegs & ZNREG_A) != 0;
+                    unsigned R = 0;
+                    if (CondC) {
+                        R = (CondV ? 0 : PSTATE_V) | (CondZN ? 0 : PSTATE_ZN);
+                    } else {
+                        R = REG_A | PSTATE_CZVN;
+                    }
+                    if (R != 0) {
+                        /* Collect info on all flags in one round to save time */
+                        R = GetRegInfo (S, I + 1, R);
+                    }
+                    CondV = (CondC && CondV) || (R & PSTATE_V) == 0;
+                    CondZN = (CondC && CondZN) || (R & PSTATE_ZN) == 0;
+                    /* This is done last as it could change the info used by the two above */
+                    CondC = CondC || (R & (REG_A | PSTATE_C)) == 0;
+                    if (CondC && CondV && CondZN) {
+                        /* ?+0, ?-0 or result unused -> remove */
+                        CS_DelEntry (S, I);
+                        ++Changes;
+                    }
+                } else if (E->OPC == OP65_ADC && In->RegA == 0) {
+                    /* 0 + arg. In this case we need only care about the C/V flags and
+                    ** let the load set the Z/N flags properly.
+                    */
+                    int CondC = PStatesAreClear (In->PFlags, PSTATE_C);
+                    int CondV = PStatesAreClear (In->PFlags, PSTATE_V);
+                    unsigned R = (CondC ? 0 : REG_A | PSTATE_C) | (CondC && CondV ? 0 : PSTATE_V);
+                    if (R) {
+                        R = GetRegInfo (S, I + 1, R);
+                    }
+                    CondV = (CondC && CondV) || (R & PSTATE_V) == 0;
+                    CondC = CondC || (R & (REG_A | PSTATE_C)) == 0;
+                    if (CondC && CondV) {
+                        /* 0 + arg -> replace with lda arg */
+                        CE_ReplaceOPC (E, OP65_LDA);
+                        ++Changes;
+                    }
                 }
                 break;
 
             case OP65_AND:
-                if (CE_IsKnownImm (E, 0xFF)) {
+                if (CE_IsKnownImm (E, 0xFF) &&
+                    ((In->ZNRegs & ZNREG_A) != 0 ||
+                     (GetRegInfo (S, I + 1, PSTATE_ZN) & PSTATE_ZN) == 0)) {
                     /* AND with 0xFF, remove */
                     CS_DelEntry (S, I);
                     ++Changes;
@@ -1293,7 +1418,9 @@ unsigned OptPrecalc (CodeSeg* S)
                 break;
 
             case OP65_ORA:
-                if (CE_IsKnownImm (E, 0x00)) {
+                if (CE_IsKnownImm (E, 0x00) &&
+                    ((In->ZNRegs & ZNREG_A) != 0 ||
+                     (GetRegInfo (S, I + 1, PSTATE_ZN) & PSTATE_ZN) == 0)) {
                     /* ORA with zero, remove */
                     CS_DelEntry (S, I);
                     ++Changes;
@@ -1310,6 +1437,23 @@ unsigned OptPrecalc (CodeSeg* S)
                 }
                 break;
 
+            case OP65_EOR:
+                if (CE_IsKnownImm (E, 0x00) &&
+                    ((In->ZNRegs & ZNREG_A) != 0 ||
+                     (GetRegInfo (S, I + 1, PSTATE_ZN) & PSTATE_ZN) == 0)) {
+                    /* EOR with zero, remove */
+                    CS_DelEntry (S, I);
+                    ++Changes;
+                } else if (RegValIsKnown (Out->RegA)) {
+                    /* Accu op zp with known contents */
+                    Arg = MakeHexArg (Out->RegA);
+                } else if (In->RegA == 0) {
+                    /* EOR but A contains 0x00 - replace by lda */
+                    CE_ReplaceOPC (E, OP65_LDA);
+                    ++Changes;
+                }
+                 break;
+
             default:
                 break;
 
@@ -1325,6 +1469,152 @@ unsigned OptPrecalc (CodeSeg* S)
 
         /* Next entry */
         ++I;
+    }
+
+    /* Return the number of changes made */
+    return Changes;
+}
+
+
+
+unsigned OptShiftBack (CodeSeg* S)
+/* Remove a pair of shifts to the opposite directions if none of the bits of
+** the register A or the Z/N flags modified by these shifts are used later.
+*/
+{
+    unsigned Changes = 0;
+    CodeEntry* E;
+    CodeEntry* N;
+    unsigned CheckStates;
+
+    /* Walk over the entries */
+    unsigned I = 0;
+    while (I < CS_GetEntryCount (S)) {
+
+        /* Get next entry */
+        E = CS_GetEntry (S, I);
+
+        /* Check if it's a register load or transfer insn */
+        if (E->OPC == OP65_ROL                  &&
+            (N = CS_GetNextEntry (S, I)) != 0   &&
+            (N->OPC == OP65_LSR ||
+             N->OPC == OP65_ROR)                &&
+            !CE_HasLabel (N)) {
+            
+            CheckStates = PSTATE_ZN;
+            
+            if (N->OPC == OP65_LSR &&
+                !PStatesAreClear (E->RI->Out.PFlags, PSTATE_C)) {
+                CheckStates |= REG_A;
+            }
+            
+            if ((GetRegInfo (S, I+2, CheckStates) & CheckStates) == 0) {
+
+                /* Remove the shifts */
+                CS_DelEntries (S, I, 2);
+
+                /* Remember, we had changes */
+                ++Changes;
+
+                /* Continue with next insn */
+                continue;
+            }
+        }
+
+        /* Next entry */
+        ++I;
+
+    }
+
+    /* Return the number of changes made */
+    return Changes;
+}
+
+
+unsigned OptSignExtended (CodeSeg* S)
+/* Change
+**
+**      lda     xxx     ; X is 0
+**      bpl     L1
+**      dex/ldx #$FF
+**  L1: cpx     #$00
+**      bpl     L2
+**
+** or
+**
+**      lda     xxx     ; X is 0
+**      bpl     L1
+**      dex/ldx #$FF
+**  L1: cpx     #$80
+**      bcc/bmi L2
+**
+** into
+**      lda     xxx     ; X is 0
+**      bpl     L2
+**      dex/ldx #$FF
+**
+** provided the C flag isn't used later.
+*/
+{
+    unsigned Changes = 0;
+    CodeEntry* L[5];
+    CodeEntry* X;
+    unsigned CheckStates;
+
+    /* Walk over the entries */
+    unsigned I = 0;
+    while (I < CS_GetEntryCount (S)) {
+
+        /* Get next entry */
+        L[0] = CS_GetEntry (S, I);
+
+        /* Check if it's a register load or transfer insn */
+        if (L[0]->OPC == OP65_LDA                   &&
+            CS_GetEntries (S, L+1, I+1, 4)          &&
+            !CS_RangeHasLabel (S, I+1, 2)           &&
+            CE_GetLabelCount (L[3]) == 1            &&
+            L[1]->JumpTo == CE_GetLabel (L[3], 0)   &&
+            (L[1]->Info & OF_CBRA) != 0             &&
+            GetBranchCond (L[1]->OPC) == BC_PL      &&
+            RegValIsKnown (L[2]->RI->Out.RegX)      &&
+            L[2]->RI->Out.RegX == 0xFF              &&
+            L[2]->OPC != OP65_JSR                   &&
+            (L[2]->Chg & REG_AXY) == REG_X) {
+
+            /* We find a sign extention */
+            CheckStates = PSTATE_CZN;
+            if (L[3]->OPC == OP65_CPX                       &&
+                CE_IsConstImm (L[3])                        &&
+                (L[4]->Info & OF_CBRA) != 0                 &&
+                ((L[3]->Num == 0x00                     &&
+                  GetBranchCond (L[4]->OPC) == BC_PL)       ||
+                ((L[3]->Num == 0x80                     &&
+                  GetBranchCond (L[4]->OPC) == BC_CC &&
+                  GetBranchCond (L[4]->OPC) == BC_MI)))) {
+
+                /* Check if the processor states set by the CPX are unused later */
+                if ((GetRegInfo (S, I+5, CheckStates) & CheckStates) == 0) {
+
+                    /* Change the target of the sign extention branch */
+                    X = NewCodeEntry (OP65_JPL, L[4]->AM, L[4]->Arg, L[4]->JumpTo, L[4]->LI);
+                    CS_InsertEntry (S, X, I+1);
+                    CS_DelEntry (S, I+2);
+
+                    /* Remove the old conditional branch */
+                    CS_DelEntries (S, I+3, 2);
+
+                    /* Remember, we had changes */
+                    ++Changes;
+
+                    /* Continue with the current insn */
+                    continue;
+                }
+            }
+        }
+
+        /* Next entry */
+        ++I;
+
     }
 
     /* Return the number of changes made */

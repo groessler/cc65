@@ -77,8 +77,8 @@ static const char BoolTransformerTab [][8] = {
 typedef struct FuncInfo FuncInfo;
 struct FuncInfo {
     const char*     Name;       /* Function name */
-    unsigned short  Use;        /* Register usage */
-    unsigned short  Chg;        /* Changed/destroyed registers */
+    unsigned        Use;        /* Register usage */
+    unsigned        Chg;        /* Changed/destroyed registers */
 };
 
 /* Note for the shift functions: Shifts are done modulo 32, so all shift
@@ -86,283 +86,286 @@ struct FuncInfo {
 ** anyway.
 */
 static const FuncInfo FuncInfoTable[] = {
-    { "addeq0sp",       REG_AX,               REG_AXY                        },
-    { "addeqysp",       REG_AXY,              REG_AXY                        },
-    { "addysp",         REG_Y,                REG_NONE                       },
-    { "aslax1",         REG_AX,               REG_AX | REG_TMP1              },
-    { "aslax2",         REG_AX,               REG_AX | REG_TMP1              },
-    { "aslax3",         REG_AX,               REG_AX | REG_TMP1              },
-    { "aslax4",         REG_AX,               REG_AX | REG_TMP1              },
-    { "aslaxy",         REG_AXY,              REG_AXY | REG_TMP1             },
-    { "asleax1",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "asleax2",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "asleax3",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "asleax4",        REG_EAX,              REG_EAXY | REG_TMP1            },
-    { "asrax1",         REG_AX,               REG_AX | REG_TMP1              },
-    { "asrax2",         REG_AX,               REG_AX | REG_TMP1              },
-    { "asrax3",         REG_AX,               REG_AX | REG_TMP1              },
-    { "asrax4",         REG_AX,               REG_AX | REG_TMP1              },
-    { "asraxy",         REG_AXY,              REG_AXY | REG_TMP1             },
-    { "asreax1",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "asreax2",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "asreax3",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "asreax4",        REG_EAX,              REG_EAXY | REG_TMP1            },
-    { "bnega",          REG_A,                REG_AX                         },
-    { "bnegax",         REG_AX,               REG_AX                         },
-    { "bnegeax",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "booleq",         REG_NONE,             REG_AX                         },
-    { "boolge",         REG_NONE,             REG_AX                         },
-    { "boolgt",         REG_NONE,             REG_AX                         },
-    { "boolle",         REG_NONE,             REG_AX                         },
-    { "boollt",         REG_NONE,             REG_AX                         },
-    { "boolne",         REG_NONE,             REG_AX                         },
-    { "booluge",        REG_NONE,             REG_AX                         },
-    { "boolugt",        REG_NONE,             REG_AX                         },
-    { "boolule",        REG_NONE,             REG_AX                         },
-    { "boolult",        REG_NONE,             REG_AX                         },
-    { "callax",         REG_AX,               REG_ALL                        },
-    { "complax",        REG_AX,               REG_AX                         },
-    { "decax1",         REG_AX,               REG_AX                         },
-    { "decax2",         REG_AX,               REG_AX                         },
-    { "decax3",         REG_AX,               REG_AX                         },
-    { "decax4",         REG_AX,               REG_AX                         },
-    { "decax5",         REG_AX,               REG_AX                         },
-    { "decax6",         REG_AX,               REG_AX                         },
-    { "decax7",         REG_AX,               REG_AX                         },
-    { "decax8",         REG_AX,               REG_AX                         },
-    { "decaxy",         REG_AXY,              REG_AX | REG_TMP1              },
-    { "deceaxy",        REG_EAXY,             REG_EAX                        },
-    { "decsp1",         REG_NONE,             REG_Y                          },
-    { "decsp2",         REG_NONE,             REG_A                          },
-    { "decsp3",         REG_NONE,             REG_A                          },
-    { "decsp4",         REG_NONE,             REG_A                          },
-    { "decsp5",         REG_NONE,             REG_A                          },
-    { "decsp6",         REG_NONE,             REG_A                          },
-    { "decsp7",         REG_NONE,             REG_A                          },
-    { "decsp8",         REG_NONE,             REG_A                          },
-    { "incax1",         REG_AX,               REG_AX                         },
-    { "incax2",         REG_AX,               REG_AX                         },
-    { "incax3",         REG_AX,               REG_AXY | REG_TMP1             },
-    { "incax4",         REG_AX,               REG_AXY | REG_TMP1             },
-    { "incax5",         REG_AX,               REG_AXY | REG_TMP1             },
-    { "incax6",         REG_AX,               REG_AXY | REG_TMP1             },
-    { "incax7",         REG_AX,               REG_AXY | REG_TMP1             },
-    { "incax8",         REG_AX,               REG_AXY | REG_TMP1             },
-    { "incaxy",         REG_AXY,              REG_AXY | REG_TMP1             },
-    { "incsp1",         REG_NONE,             REG_NONE                       },
-    { "incsp2",         REG_NONE,             REG_Y                          },
-    { "incsp3",         REG_NONE,             REG_Y                          },
-    { "incsp4",         REG_NONE,             REG_Y                          },
-    { "incsp5",         REG_NONE,             REG_Y                          },
-    { "incsp6",         REG_NONE,             REG_Y                          },
-    { "incsp7",         REG_NONE,             REG_Y                          },
-    { "incsp8",         REG_NONE,             REG_Y                          },
-    { "laddeq",         REG_EAXY|REG_PTR1_LO, REG_EAXY | REG_PTR1_HI         },
-    { "laddeq0sp",      REG_EAX,              REG_EAXY                       },
-    { "laddeq1",        REG_Y | REG_PTR1_LO,  REG_EAXY | REG_PTR1_HI         },
-    { "laddeqa",        REG_AY | REG_PTR1_LO, REG_EAXY | REG_PTR1_HI         },
-    { "laddeqysp",      REG_EAXY,             REG_EAXY                       },
-    { "ldaidx",         REG_AXY,              REG_AX | REG_PTR1              },
-    { "ldauidx",        REG_AXY,              REG_AX | REG_PTR1              },
-    { "ldax0sp",        REG_NONE,             REG_AXY                        },
-    { "ldaxi",          REG_AX,               REG_AXY | REG_PTR1             },
-    { "ldaxidx",        REG_AXY,              REG_AXY | REG_PTR1             },
-    { "ldaxysp",        REG_Y,                REG_AXY                        },
-    { "ldeax0sp",       REG_NONE,             REG_EAXY                       },
-    { "ldeaxi",         REG_AX,               REG_EAXY | REG_PTR1            },
-    { "ldeaxidx",       REG_AXY,              REG_EAXY | REG_PTR1            },
-    { "ldeaxysp",       REG_Y,                REG_EAXY                       },
-    { "leaa0sp",        REG_A,                REG_AX                         },
-    { "leaaxsp",        REG_AX,               REG_AX                         },
-    { "lsubeq",         REG_EAXY|REG_PTR1_LO, REG_EAXY | REG_PTR1_HI         },
-    { "lsubeq0sp",      REG_EAX,              REG_EAXY                       },
-    { "lsubeq1",        REG_Y | REG_PTR1_LO,  REG_EAXY | REG_PTR1_HI         },
-    { "lsubeqa",        REG_AY | REG_PTR1_LO, REG_EAXY | REG_PTR1_HI         },
-    { "lsubeqysp",      REG_EAXY,             REG_EAXY                       },
-    { "mulax10",        REG_AX,               REG_AX | REG_PTR1              },
-    { "mulax3",         REG_AX,               REG_AX | REG_PTR1              },
-    { "mulax5",         REG_AX,               REG_AX | REG_PTR1              },
-    { "mulax6",         REG_AX,               REG_AX | REG_PTR1              },
-    { "mulax7",         REG_AX,               REG_AX | REG_PTR1              },
-    { "mulax9",         REG_AX,               REG_AX | REG_PTR1              },
-    { "negax",          REG_AX,               REG_AX                         },
-    { "push0",          REG_NONE,             REG_AXY                        },
-    { "push0ax",        REG_AX,               REG_Y | REG_SREG               },
-    { "push1",          REG_NONE,             REG_AXY                        },
-    { "push2",          REG_NONE,             REG_AXY                        },
-    { "push3",          REG_NONE,             REG_AXY                        },
-    { "push4",          REG_NONE,             REG_AXY                        },
-    { "push5",          REG_NONE,             REG_AXY                        },
-    { "push6",          REG_NONE,             REG_AXY                        },
-    { "push7",          REG_NONE,             REG_AXY                        },
-    { "pusha",          REG_A,                REG_Y                          },
-    { "pusha0",         REG_A,                REG_XY                         },
-    { "pusha0sp",       REG_NONE,             REG_AY                         },
-    { "pushaFF",        REG_A,                REG_Y                          },
-    { "pushax",         REG_AX,               REG_Y                          },
-    { "pushaysp",       REG_Y,                REG_AY                         },
-    { "pushc0",         REG_NONE,             REG_A | REG_Y                  },
-    { "pushc1",         REG_NONE,             REG_A | REG_Y                  },
-    { "pushc2",         REG_NONE,             REG_A | REG_Y                  },
-    { "pusheax",        REG_EAX,              REG_Y                          },
-    { "pushl0",         REG_NONE,             REG_AXY                        },
-    { "pushw",          REG_AX,               REG_AXY | REG_PTR1             },
-    { "pushw0sp",       REG_NONE,             REG_AXY                        },
-    { "pushwidx",       REG_AXY,              REG_AXY | REG_PTR1             },
-    { "pushwysp",       REG_Y,                REG_AXY                        },
-    { "regswap",        REG_AXY,              REG_AXY | REG_TMP1             },
-    { "regswap1",       REG_XY,               REG_A                          },
-    { "regswap2",       REG_XY,               REG_A | REG_Y                  },
-    { "return0",        REG_NONE,             REG_AX                         },
-    { "return1",        REG_NONE,             REG_AX                         },
-    { "shlax1",         REG_AX,               REG_AX | REG_TMP1              },
-    { "shlax2",         REG_AX,               REG_AX | REG_TMP1              },
-    { "shlax3",         REG_AX,               REG_AX | REG_TMP1              },
-    { "shlax4",         REG_AX,               REG_AX | REG_TMP1              },
-    { "shlaxy",         REG_AXY,              REG_AXY | REG_TMP1             },
-    { "shleax1",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "shleax2",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "shleax3",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "shleax4",        REG_EAX,              REG_EAXY | REG_TMP1            },
-    { "shrax1",         REG_AX,               REG_AX | REG_TMP1              },
-    { "shrax2",         REG_AX,               REG_AX | REG_TMP1              },
-    { "shrax3",         REG_AX,               REG_AX | REG_TMP1              },
-    { "shrax4",         REG_AX,               REG_AX | REG_TMP1              },
-    { "shraxy",         REG_AXY,              REG_AXY | REG_TMP1             },
-    { "shreax1",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "shreax2",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "shreax3",        REG_EAX,              REG_EAX | REG_TMP1             },
-    { "shreax4",        REG_EAX,              REG_EAXY | REG_TMP1            },
-    { "staspidx",       REG_A | REG_Y,        REG_Y | REG_TMP1 | REG_PTR1    },
-    { "stax0sp",        REG_AX,               REG_Y                          },
-    { "staxspidx",      REG_AXY,              REG_TMP1 | REG_PTR1            },
-    { "staxysp",        REG_AXY,              REG_Y                          },
-    { "steax0sp",       REG_EAX,              REG_Y                          },
-    { "steaxysp",       REG_EAXY,             REG_Y                          },
-    { "subeq0sp",       REG_AX,               REG_AXY                        },
-    { "subeqysp",       REG_AXY,              REG_AXY                        },
-    { "subysp",         REG_Y,                REG_AY                         },
-    { "tosadd0ax",      REG_AX,               REG_EAXY | REG_TMP1            },
-    { "tosadda0",       REG_A,                REG_AXY                        },
-    { "tosaddax",       REG_AX,               REG_AXY                        },
-    { "tosaddeax",      REG_EAX,              REG_EAXY | REG_TMP1            },
-    { "tosand0ax",      REG_AX,               REG_EAXY | REG_TMP1            },
-    { "tosanda0",       REG_A,                REG_AXY                        },
-    { "tosandax",       REG_AX,               REG_AXY                        },
-    { "tosandeax",      REG_EAX,              REG_EAXY | REG_TMP1            },
-    { "tosaslax",       REG_A,                REG_AXY | REG_TMP1             },
-    { "tosasleax",      REG_A,                REG_EAXY | REG_TMP1            },
-    { "tosasrax",       REG_A,                REG_AXY | REG_TMP1             },
-    { "tosasreax",      REG_A,                REG_EAXY | REG_TMP1            },
-    { "tosdiv0ax",      REG_AX,               REG_ALL                        },
-    { "tosdiva0",       REG_A,                REG_ALL                        },
-    { "tosdivax",       REG_AX,               REG_ALL                        },
-    { "tosdiveax",      REG_EAX,              REG_ALL                        },
-    { "toseq00",        REG_NONE,             REG_AXY | REG_SREG             },
-    { "toseqa0",        REG_A,                REG_AXY | REG_SREG             },
-    { "toseqax",        REG_AX,               REG_AXY | REG_SREG             },
-    { "toseqeax",       REG_EAX,              REG_AXY | REG_PTR1             },
-    { "tosge00",        REG_NONE,             REG_AXY | REG_SREG             },
-    { "tosgea0",        REG_A,                REG_AXY | REG_SREG             },
-    { "tosgeax",        REG_AX,               REG_AXY | REG_SREG             },
-    { "tosgeeax",       REG_EAX,              REG_AXY | REG_PTR1             },
-    { "tosgt00",        REG_NONE,             REG_AXY | REG_SREG             },
-    { "tosgta0",        REG_A,                REG_AXY | REG_SREG             },
-    { "tosgtax",        REG_AX,               REG_AXY | REG_SREG             },
-    { "tosgteax",       REG_EAX,              REG_AXY | REG_PTR1             },
-    { "tosicmp",        REG_AX,               REG_AXY | REG_SREG             },
-    { "tosicmp0",       REG_A,                REG_AXY | REG_SREG             },
-    { "toslcmp",        REG_EAX,              REG_A | REG_Y | REG_PTR1       },
-    { "tosle00",        REG_NONE,             REG_AXY | REG_SREG             },
-    { "toslea0",        REG_A,                REG_AXY | REG_SREG             },
-    { "tosleax",        REG_AX,               REG_AXY | REG_SREG             },
-    { "tosleeax",       REG_EAX,              REG_AXY | REG_PTR1             },
-    { "toslt00",        REG_NONE,             REG_AXY | REG_SREG             },
-    { "toslta0",        REG_A,                REG_AXY | REG_SREG             },
-    { "tosltax",        REG_AX,               REG_AXY | REG_SREG             },
-    { "toslteax",       REG_EAX,              REG_AXY | REG_PTR1             },
-    { "tosmod0ax",      REG_AX,               REG_ALL                        },
-    { "tosmodeax",      REG_EAX,              REG_ALL                        },
-    { "tosmul0ax",      REG_AX,               REG_ALL                        },
-    { "tosmula0",       REG_A,                REG_ALL                        },
-    { "tosmulax",       REG_AX,               REG_ALL                        },
-    { "tosmuleax",      REG_EAX,              REG_ALL                        },
-    { "tosne00",        REG_NONE,             REG_AXY | REG_SREG             },
-    { "tosnea0",        REG_A,                REG_AXY | REG_SREG             },
-    { "tosneax",        REG_AX,               REG_AXY | REG_SREG             },
-    { "tosneeax",       REG_EAX,              REG_AXY | REG_PTR1             },
-    { "tosor0ax",       REG_AX,               REG_EAXY | REG_TMP1            },
-    { "tosora0",        REG_A,                REG_AXY | REG_TMP1             },
-    { "tosorax",        REG_AX,               REG_AXY | REG_TMP1             },
-    { "tosoreax",       REG_EAX,              REG_EAXY | REG_TMP1            },
-    { "tosrsub0ax",     REG_AX,               REG_EAXY | REG_TMP1            },
-    { "tosrsuba0",      REG_A,                REG_AXY | REG_TMP1             },
-    { "tosrsubax",      REG_AX,               REG_AXY | REG_TMP1             },
-    { "tosrsubeax",     REG_EAX,              REG_EAXY | REG_TMP1            },
-    { "tosshlax",       REG_A,                REG_AXY | REG_TMP1             },
-    { "tosshleax",      REG_A,                REG_EAXY | REG_TMP1            },
-    { "tosshrax",       REG_A,                REG_AXY | REG_TMP1             },
-    { "tosshreax",      REG_A,                REG_EAXY | REG_TMP1            },
-    { "tossub0ax",      REG_AX,               REG_EAXY                       },
-    { "tossuba0",       REG_A,                REG_AXY                        },
-    { "tossubax",       REG_AX,               REG_AXY                        },
-    { "tossubeax",      REG_EAX,              REG_EAXY                       },
-    { "tosudiv0ax",     REG_AX,               REG_ALL & ~REG_SAVE            },
-    { "tosudiva0",      REG_A,                REG_EAXY | REG_PTR1            }, /* also ptr4 */
-    { "tosudivax",      REG_AX,               REG_EAXY | REG_PTR1            }, /* also ptr4 */
-    { "tosudiveax",     REG_EAX,              REG_ALL & ~REG_SAVE            },
-    { "tosuge00",       REG_NONE,             REG_AXY | REG_SREG             },
-    { "tosugea0",       REG_A,                REG_AXY | REG_SREG             },
-    { "tosugeax",       REG_AX,               REG_AXY | REG_SREG             },
-    { "tosugeeax",      REG_EAX,              REG_AXY | REG_PTR1             },
-    { "tosugt00",       REG_NONE,             REG_AXY | REG_SREG             },
-    { "tosugta0",       REG_A,                REG_AXY | REG_SREG             },
-    { "tosugtax",       REG_AX,               REG_AXY | REG_SREG             },
-    { "tosugteax",      REG_EAX,              REG_AXY | REG_PTR1             },
-    { "tosule00",       REG_NONE,             REG_AXY | REG_SREG             },
-    { "tosulea0",       REG_A,                REG_AXY | REG_SREG             },
-    { "tosuleax",       REG_AX,               REG_AXY | REG_SREG             },
-    { "tosuleeax",      REG_EAX,              REG_AXY | REG_PTR1             },
-    { "tosult00",       REG_NONE,             REG_AXY | REG_SREG             },
-    { "tosulta0",       REG_A,                REG_AXY | REG_SREG             },
-    { "tosultax",       REG_AX,               REG_AXY | REG_SREG             },
-    { "tosulteax",      REG_EAX,              REG_AXY | REG_PTR1             },
-    { "tosumod0ax",     REG_AX,               REG_ALL & ~REG_SAVE            },
-    { "tosumoda0",      REG_A,                REG_EAXY | REG_PTR1            }, /* also ptr4 */
-    { "tosumodax",      REG_AX,               REG_EAXY | REG_PTR1            }, /* also ptr4 */
-    { "tosumodeax",     REG_EAX,              REG_ALL & ~REG_SAVE            },
-    { "tosumul0ax",     REG_AX,               REG_ALL                        },
-    { "tosumula0",      REG_A,                REG_ALL                        },
-    { "tosumulax",      REG_AX,               REG_ALL                        },
-    { "tosumuleax",     REG_EAX,              REG_ALL                        },
-    { "tosxor0ax",      REG_AX,               REG_EAXY | REG_TMP1            },
-    { "tosxora0",       REG_A,                REG_AXY | REG_TMP1             },
-    { "tosxorax",       REG_AX,               REG_AXY | REG_TMP1             },
-    { "tosxoreax",      REG_EAX,              REG_EAXY | REG_TMP1            },
-    { "tsteax",         REG_EAX,              REG_Y                          },
-    { "utsteax",        REG_EAX,              REG_Y                          },
+    { "addeq0sp",       REG_AX,         PSTATE_ALL | REG_AXY                        },
+    { "addeqysp",       REG_AXY,        PSTATE_ALL | REG_AXY                        },
+    { "addysp",         REG_Y,          PSTATE_ALL | REG_NONE                       },
+    { "aslax1",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "aslax2",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "aslax3",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "aslax4",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "aslaxy",         REG_AXY,        PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "asleax1",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "asleax2",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "asleax3",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "asleax4",        REG_EAX,        PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "asrax1",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "asrax2",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "asrax3",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "asrax4",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "asraxy",         REG_AXY,        PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "asreax1",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "asreax2",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "asreax3",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "asreax4",        REG_EAX,        PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "bcasta",         REG_A,          PSTATE_ALL | REG_AX                         },
+    { "bcastax",        REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "bcasteax",       REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "bnega",          REG_A,          PSTATE_ALL | REG_AX                         },
+    { "bnegax",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "bnegeax",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "booleq",         PSTATE_Z,       PSTATE_ALL | REG_AX                         },
+    { "boolge",         PSTATE_N,       PSTATE_ALL | REG_AX                         },
+    { "boolgt",         PSTATE_ZN,      PSTATE_ALL | REG_AX                         },
+    { "boolle",         PSTATE_ZN,      PSTATE_ALL | REG_AX                         },
+    { "boollt",         PSTATE_N,       PSTATE_ALL | REG_AX                         },
+    { "boolne",         PSTATE_Z,       PSTATE_ALL | REG_AX                         },
+    { "booluge",        PSTATE_C,       PSTATE_ALL | REG_AX                         },
+    { "boolugt",        PSTATE_CZ,      PSTATE_ALL | REG_AX                         },
+    { "boolule",        PSTATE_CZ,      PSTATE_ALL | REG_AX                         },
+    { "boolult",        PSTATE_C,       PSTATE_ALL | REG_AX                         },
+    { "callax",         REG_AX,         PSTATE_ALL | REG_ALL                        },
+    { "complax",        REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "decax1",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "decax2",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "decax3",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "decax4",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "decax5",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "decax6",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "decax7",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "decax8",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "decaxy",         REG_AXY,        PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "deceaxy",        REG_EAXY,       PSTATE_ALL | REG_EAX                        },
+    { "decsp1",         REG_NONE,       PSTATE_ALL | REG_Y                          },
+    { "decsp2",         REG_NONE,       PSTATE_ALL | REG_A                          },
+    { "decsp3",         REG_NONE,       PSTATE_ALL | REG_A                          },
+    { "decsp4",         REG_NONE,       PSTATE_ALL | REG_A                          },
+    { "decsp5",         REG_NONE,       PSTATE_ALL | REG_A                          },
+    { "decsp6",         REG_NONE,       PSTATE_ALL | REG_A                          },
+    { "decsp7",         REG_NONE,       PSTATE_ALL | REG_A                          },
+    { "decsp8",         REG_NONE,       PSTATE_ALL | REG_A                          },
+    { "incax1",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "incax2",         REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "incax3",         REG_AX,         PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "incax4",         REG_AX,         PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "incax5",         REG_AX,         PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "incax6",         REG_AX,         PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "incax7",         REG_AX,         PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "incax8",         REG_AX,         PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "incaxy",         REG_AXY,        PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "incsp1",         REG_NONE,       PSTATE_ALL | REG_NONE                       },
+    { "incsp2",         REG_NONE,       PSTATE_ALL | REG_Y                          },
+    { "incsp3",         REG_NONE,       PSTATE_ALL | REG_Y                          },
+    { "incsp4",         REG_NONE,       PSTATE_ALL | REG_Y                          },
+    { "incsp5",         REG_NONE,       PSTATE_ALL | REG_Y                          },
+    { "incsp6",         REG_NONE,       PSTATE_ALL | REG_Y                          },
+    { "incsp7",         REG_NONE,       PSTATE_ALL | REG_Y                          },
+    { "incsp8",         REG_NONE,       PSTATE_ALL | REG_Y                          },
+    { "laddeq",         REG_EAXY|REG_PTR1_LO, PSTATE_ALL | REG_EAXY | REG_PTR1_HI   },
+    { "laddeq0sp",      REG_EAX,              PSTATE_ALL | REG_EAXY                 },
+    { "laddeq1",        REG_Y | REG_PTR1_LO,  PSTATE_ALL | REG_EAXY | REG_PTR1_HI   },
+    { "laddeqa",        REG_AY | REG_PTR1_LO, PSTATE_ALL | REG_EAXY | REG_PTR1_HI   },
+    { "laddeqysp",      REG_EAXY,       PSTATE_ALL | REG_EAXY                       },
+    { "ldaidx",         REG_AXY,        PSTATE_ALL | REG_AX | REG_PTR1              },
+    { "ldauidx",        REG_AXY,        PSTATE_ALL | REG_AX | REG_PTR1              },
+    { "ldax0sp",        REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "ldaxi",          REG_AX,         PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "ldaxidx",        REG_AXY,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "ldaxysp",        REG_Y,          PSTATE_ALL | REG_AXY                        },
+    { "ldeax0sp",       REG_NONE,       PSTATE_ALL | REG_EAXY                       },
+    { "ldeaxi",         REG_AX,         PSTATE_ALL | REG_EAXY | REG_PTR1            },
+    { "ldeaxidx",       REG_AXY,        PSTATE_ALL | REG_EAXY | REG_PTR1            },
+    { "ldeaxysp",       REG_Y,          PSTATE_ALL | REG_EAXY                       },
+    { "leaa0sp",        REG_A,          PSTATE_ALL | REG_AX                         },
+    { "leaaxsp",        REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "lsubeq",         REG_EAXY|REG_PTR1_LO, PSTATE_ALL | REG_EAXY | REG_PTR1_HI   },
+    { "lsubeq0sp",      REG_EAX,              PSTATE_ALL | REG_EAXY                 },
+    { "lsubeq1",        REG_Y | REG_PTR1_LO,  PSTATE_ALL | REG_EAXY | REG_PTR1_HI   },
+    { "lsubeqa",        REG_AY | REG_PTR1_LO, PSTATE_ALL | REG_EAXY | REG_PTR1_HI   },
+    { "lsubeqysp",      REG_EAXY,       PSTATE_ALL | REG_EAXY                       },
+    { "mulax10",        REG_AX,         PSTATE_ALL | REG_AX | REG_PTR1              },
+    { "mulax3",         REG_AX,         PSTATE_ALL | REG_AX | REG_PTR1              },
+    { "mulax5",         REG_AX,         PSTATE_ALL | REG_AX | REG_PTR1              },
+    { "mulax6",         REG_AX,         PSTATE_ALL | REG_AX | REG_PTR1              },
+    { "mulax7",         REG_AX,         PSTATE_ALL | REG_AX | REG_PTR1              },
+    { "mulax9",         REG_AX,         PSTATE_ALL | REG_AX | REG_PTR1              },
+    { "negax",          REG_AX,         PSTATE_ALL | REG_AX                         },
+    { "push0",          REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "push0ax",        REG_AX,         PSTATE_ALL | REG_Y | REG_SREG               },
+    { "push1",          REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "push2",          REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "push3",          REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "push4",          REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "push5",          REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "push6",          REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "push7",          REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "pusha",          REG_A,          PSTATE_ALL | REG_Y                          },
+    { "pusha0",         REG_A,          PSTATE_ALL | REG_XY                         },
+    { "pusha0sp",       REG_NONE,       PSTATE_ALL | REG_AY                         },
+    { "pushaFF",        REG_A,          PSTATE_ALL | REG_Y                          },
+    { "pushax",         REG_AX,         PSTATE_ALL | REG_Y                          },
+    { "pushaysp",       REG_Y,          PSTATE_ALL | REG_AY                         },
+    { "pushc0",         REG_NONE,       PSTATE_ALL | REG_A | REG_Y                  },
+    { "pushc1",         REG_NONE,       PSTATE_ALL | REG_A | REG_Y                  },
+    { "pushc2",         REG_NONE,       PSTATE_ALL | REG_A | REG_Y                  },
+    { "pusheax",        REG_EAX,        PSTATE_ALL | REG_Y                          },
+    { "pushl0",         REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "pushw",          REG_AX,         PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "pushw0sp",       REG_NONE,       PSTATE_ALL | REG_AXY                        },
+    { "pushwidx",       REG_AXY,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "pushwysp",       REG_Y,          PSTATE_ALL | REG_AXY                        },
+    { "regswap",        REG_AXY,        PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "regswap1",       REG_XY,         PSTATE_ALL | REG_A                          },
+    { "regswap2",       REG_XY,         PSTATE_ALL | REG_A | REG_Y                  },
+    { "return0",        REG_NONE,       PSTATE_ALL | REG_AX                         },
+    { "return1",        REG_NONE,       PSTATE_ALL | REG_AX                         },
+    { "shlax1",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "shlax2",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "shlax3",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "shlax4",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "shlaxy",         REG_AXY,        PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "shleax1",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "shleax2",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "shleax3",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "shleax4",        REG_EAX,        PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "shrax1",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "shrax2",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "shrax3",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "shrax4",         REG_AX,         PSTATE_ALL | REG_AX | REG_TMP1              },
+    { "shraxy",         REG_AXY,        PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "shreax1",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "shreax2",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "shreax3",        REG_EAX,        PSTATE_ALL | REG_EAX | REG_TMP1             },
+    { "shreax4",        REG_EAX,        PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "staspidx",       REG_A | REG_Y,  PSTATE_ALL | REG_Y | REG_TMP1 | REG_PTR1    },
+    { "stax0sp",        REG_AX,         PSTATE_ALL | REG_Y                          },
+    { "staxspidx",      REG_AXY,        PSTATE_ALL | REG_TMP1 | REG_PTR1            },
+    { "staxysp",        REG_AXY,        PSTATE_ALL | REG_Y                          },
+    { "steax0sp",       REG_EAX,        PSTATE_ALL | REG_Y                          },
+    { "steaxysp",       REG_EAXY,       PSTATE_ALL | REG_Y                          },
+    { "subeq0sp",       REG_AX,         PSTATE_ALL | REG_AXY                        },
+    { "subeqysp",       REG_AXY,        PSTATE_ALL | REG_AXY                        },
+    { "subysp",         REG_Y,          PSTATE_ALL | REG_AY                         },
+    { "tosadd0ax",      REG_AX,         PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosadda0",       REG_A,          PSTATE_ALL | REG_AXY                        },
+    { "tosaddax",       REG_AX,         PSTATE_ALL | REG_AXY                        },
+    { "tosaddeax",      REG_EAX,        PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosand0ax",      REG_AX,         PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosanda0",       REG_A,          PSTATE_ALL | REG_AXY                        },
+    { "tosandax",       REG_AX,         PSTATE_ALL | REG_AXY                        },
+    { "tosandeax",      REG_EAX,        PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosaslax",       REG_A,          PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "tosasleax",      REG_A,          PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosasrax",       REG_A,          PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "tosasreax",      REG_A,          PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosdiv0ax",      REG_AX,         PSTATE_ALL | REG_ALL                        },
+    { "tosdiva0",       REG_A,          PSTATE_ALL | REG_ALL                        },
+    { "tosdivax",       REG_AX,         PSTATE_ALL | REG_ALL                        },
+    { "tosdiveax",      REG_EAX,        PSTATE_ALL | REG_ALL                        },
+    { "toseq00",        REG_NONE,       PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "toseqa0",        REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "toseqax",        REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "toseqeax",       REG_EAX,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "tosge00",        REG_NONE,       PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosgea0",        REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosgeax",        REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosgeeax",       REG_EAX,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "tosgt00",        REG_NONE,       PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosgta0",        REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosgtax",        REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosgteax",       REG_EAX,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "tosicmp",        REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosicmp0",       REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "toslcmp",        REG_EAX,        PSTATE_ALL | REG_A | REG_Y | REG_PTR1       },
+    { "tosle00",        REG_NONE,       PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "toslea0",        REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosleax",        REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosleeax",       REG_EAX,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "toslt00",        REG_NONE,       PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "toslta0",        REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosltax",        REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "toslteax",       REG_EAX,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "tosmod0ax",      REG_AX,         PSTATE_ALL | REG_ALL                        },
+    { "tosmodeax",      REG_EAX,        PSTATE_ALL | REG_ALL                        },
+    { "tosmul0ax",      REG_AX,         PSTATE_ALL | REG_ALL                        },
+    { "tosmula0",       REG_A,          PSTATE_ALL | REG_ALL                        },
+    { "tosmulax",       REG_AX,         PSTATE_ALL | REG_ALL                        },
+    { "tosmuleax",      REG_EAX,        PSTATE_ALL | REG_ALL                        },
+    { "tosne00",        REG_NONE,       PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosnea0",        REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosneax",        REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosneeax",       REG_EAX,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "tosor0ax",       REG_AX,         PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosora0",        REG_A,          PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "tosorax",        REG_AX,         PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "tosoreax",       REG_EAX,        PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosrsub0ax",     REG_AX,         PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosrsuba0",      REG_A,          PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "tosrsubax",      REG_AX,         PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "tosrsubeax",     REG_EAX,        PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosshlax",       REG_A,          PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "tosshleax",      REG_A,          PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosshrax",       REG_A,          PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "tosshreax",      REG_A,          PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tossub0ax",      REG_AX,         PSTATE_ALL | REG_EAXY                       },
+    { "tossuba0",       REG_A,          PSTATE_ALL | REG_AXY                        },
+    { "tossubax",       REG_AX,         PSTATE_ALL | REG_AXY                        },
+    { "tossubeax",      REG_EAX,        PSTATE_ALL | REG_EAXY                       },
+    { "tosudiv0ax",     REG_AX,         PSTATE_ALL | (REG_ALL & ~REG_SAVE)          },
+    { "tosudiva0",      REG_A,          PSTATE_ALL | REG_EAXY | REG_PTR1            }, /* also ptr4 */
+    { "tosudivax",      REG_AX,         PSTATE_ALL | REG_EAXY | REG_PTR1            }, /* also ptr4 */
+    { "tosudiveax",     REG_EAX,        PSTATE_ALL | (REG_ALL & ~REG_SAVE)          },
+    { "tosuge00",       REG_NONE,       PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosugea0",       REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosugeax",       REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosugeeax",      REG_EAX,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "tosugt00",       REG_NONE,       PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosugta0",       REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosugtax",       REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosugteax",      REG_EAX,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "tosule00",       REG_NONE,       PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosulea0",       REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosuleax",       REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosuleeax",      REG_EAX,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "tosult00",       REG_NONE,       PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosulta0",       REG_A,          PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosultax",       REG_AX,         PSTATE_ALL | REG_AXY | REG_SREG             },
+    { "tosulteax",      REG_EAX,        PSTATE_ALL | REG_AXY | REG_PTR1             },
+    { "tosumod0ax",     REG_AX,         PSTATE_ALL | (REG_ALL & ~REG_SAVE)          },
+    { "tosumoda0",      REG_A,          PSTATE_ALL | REG_EAXY | REG_PTR1            }, /* also ptr4 */
+    { "tosumodax",      REG_AX,         PSTATE_ALL | REG_EAXY | REG_PTR1            }, /* also ptr4 */
+    { "tosumodeax",     REG_EAX,        PSTATE_ALL | (REG_ALL & ~REG_SAVE)          },
+    { "tosumul0ax",     REG_AX,         PSTATE_ALL | REG_ALL                        },
+    { "tosumula0",      REG_A,          PSTATE_ALL | REG_ALL                        },
+    { "tosumulax",      REG_AX,         PSTATE_ALL | REG_ALL                        },
+    { "tosumuleax",     REG_EAX,        PSTATE_ALL | REG_ALL                        },
+    { "tosxor0ax",      REG_AX,         PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tosxora0",       REG_A,          PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "tosxorax",       REG_AX,         PSTATE_ALL | REG_AXY | REG_TMP1             },
+    { "tosxoreax",      REG_EAX,        PSTATE_ALL | REG_EAXY | REG_TMP1            },
+    { "tsteax",         REG_EAX,        PSTATE_ALL | REG_Y                          },
+    { "utsteax",        REG_EAX,        PSTATE_ALL | REG_Y                          },
 };
 #define FuncInfoCount   (sizeof(FuncInfoTable) / sizeof(FuncInfoTable[0]))
 
 /* Table with names of zero page locations used by the compiler */
 static const ZPInfo ZPInfoTable[] = {
-    {   0, "ptr1",      REG_PTR1_LO,    REG_PTR1        },
-    {   0, "ptr1+1",    REG_PTR1_HI,    REG_PTR1        },
-    {   0, "ptr2",      REG_PTR2_LO,    REG_PTR2        },
-    {   0, "ptr2+1",    REG_PTR2_HI,    REG_PTR2        },
-    {   4, "ptr3",      REG_NONE,       REG_NONE        },
-    {   4, "ptr4",      REG_NONE,       REG_NONE        },
-    {   7, "regbank",   REG_NONE,       REG_NONE        },
-    {   0, "regsave",   REG_SAVE_LO,    REG_SAVE        },
-    {   0, "regsave+1", REG_SAVE_HI,    REG_SAVE        },
-    {   0, "sp",        REG_SP_LO,      REG_SP          },
-    {   0, "sp+1",      REG_SP_HI,      REG_SP          },
-    {   0, "sreg",      REG_SREG_LO,    REG_SREG        },
-    {   0, "sreg+1",    REG_SREG_HI,    REG_SREG        },
-    {   0, "tmp1",      REG_TMP1,       REG_TMP1        },
-    {   0, "tmp2",      REG_NONE,       REG_NONE        },
-    {   0, "tmp3",      REG_NONE,       REG_NONE        },
-    {   0, "tmp4",      REG_NONE,       REG_NONE        },
+    {   0, "ptr1",      2,  REG_PTR1_LO,    REG_PTR1    },
+    {   0, "ptr1+1",    1,  REG_PTR1_HI,    REG_PTR1    },
+    {   0, "ptr2",      2,  REG_PTR2_LO,    REG_PTR2    },
+    {   0, "ptr2+1",    1,  REG_PTR2_HI,    REG_PTR2    },
+    {   4, "ptr3",      2,  REG_NONE,       REG_NONE    },
+    {   4, "ptr4",      2,  REG_NONE,       REG_NONE    },
+    {   7, "regbank",   6,  REG_NONE,       REG_NONE    },
+    {   0, "regsave",   4,  REG_SAVE_LO,    REG_SAVE    },
+    {   0, "regsave+1", 3,  REG_SAVE_HI,    REG_SAVE    },
+    {   0, "sp",        2,  REG_SP_LO,      REG_SP      },
+    {   0, "sp+1",      1,  REG_SP_HI,      REG_SP      },
+    {   0, "sreg",      2,  REG_SREG_LO,    REG_SREG    },
+    {   0, "sreg+1",    1,  REG_SREG_HI,    REG_SREG    },
+    {   0, "tmp1",      1,  REG_TMP1,       REG_TMP1    },
+    {   0, "tmp2",      1,  REG_NONE,       REG_NONE    },
+    {   0, "tmp3",      1,  REG_NONE,       REG_NONE    },
+    {   0, "tmp4",      1,  REG_NONE,       REG_NONE    },
 };
 #define ZPInfoCount     (sizeof(ZPInfoTable) / sizeof(ZPInfoTable[0]))
 
@@ -374,6 +377,83 @@ static const ZPInfo ZPInfoTable[] = {
 
 
 
+static int IsAddrOnZP (long Address)
+/* Return true if the Address is within the ZP range.
+** FIXME: ZP range may vary depending on the CPU settings.
+*/
+{
+    /* ZP in range [0x00, 0xFF] */
+    return Address >= 0 && Address < 0x100;
+}
+
+
+
+int IsZPArg (const char* Name)
+/* Exam if the main part of the arg string indicates a ZP loc */
+{
+    unsigned short  ArgInfo = 0;
+    long            Offset = 0;
+    StrBuf          NameBuf = AUTO_STRBUF_INITIALIZER;
+    SymEntry*       E = 0;
+    const ZPInfo*   Info = 0;
+
+    if (!ParseOpcArgStr (Name, &ArgInfo, &NameBuf, &Offset)) {
+        /* Parsing failed */
+        SB_Done (&NameBuf);
+        return 0;
+    }
+
+    if ((ArgInfo & AIF_HAS_NAME) == 0) {
+        /* Numeric locs have no names */
+        SB_Done (&NameBuf);
+
+        /* We can check it against the ZP boundary if it is known */
+        return IsAddrOnZP (Offset);
+    }
+
+    if ((ArgInfo & AIF_BUILTIN) != 0) {
+        /* Search for the name in the list of builtin ZPs */
+        Info = GetZPInfo (SB_GetConstBuf (&NameBuf));
+
+        SB_Done (&NameBuf);
+
+        /* Do we know the ZP? */
+        if (Info != 0) {
+            /* Use the information we have */
+            return Offset >= 0 && Offset < (int)Info->Size;
+        }
+
+        /* Assume it be non-ZP */
+        return 0;
+    }
+
+    if ((ArgInfo & AIF_EXTERNAL) == 0) {
+        /* We don't support local variables on ZP */
+        SB_Done (&NameBuf);
+        return 0;
+    }
+
+    /* Search for the symbol in the global symbol table skipping the underline
+    ** in its name.
+    */
+    E = FindGlobalSym (SB_GetConstBuf (&NameBuf) + 1);
+
+    SB_Done (&NameBuf);
+
+    /* We are checking the offset against the symbol size rather than the actual
+    ** zeropage boundary, since we can't magically ensure that until linking and
+    ** can only trust the user in writing the correct code for now.
+    */
+    if (E != 0 && (E->Flags & SC_ZEROPAGE) != 0) {
+        return Offset >= 0 && (unsigned)Offset < CheckedSizeOf (E->Type);
+    }
+
+    /* Not found on ZP */
+    return 0;
+}
+
+
+
 static int CompareFuncInfo (const void* Key, const void* Info)
 /* Compare function for bsearch */
 {
@@ -382,10 +462,10 @@ static int CompareFuncInfo (const void* Key, const void* Info)
 
 
 
-fncls_t GetFuncInfo (const char* Name, unsigned short* Use, unsigned short* Chg)
+fncls_t GetFuncInfo (const char* Name, unsigned int* Use, unsigned int* Chg)
 /* For the given function, lookup register information and store it into
 ** the given variables. If the function is unknown, assume it will use and
-** load all registers.
+** load all registers as well as touching the processor flags.
 */
 {
     /* If the function name starts with an underline, it is an external
@@ -438,6 +518,9 @@ fncls_t GetFuncInfo (const char* Name, unsigned short* Use, unsigned short* Chg)
             /* Will destroy all registers */
             *Chg = REG_ALL;
 
+            /* and will destroy all processor flags */
+            *Chg |= PSTATE_ALL;
+
             /* Done */
             return FNCLS_GLOBAL;
         }
@@ -450,6 +533,7 @@ fncls_t GetFuncInfo (const char* Name, unsigned short* Use, unsigned short* Chg)
         */
         *Use = REG_ALL;
         *Chg = REG_ALL;
+        *Chg |= PSTATE_ALL;
         return FNCLS_NUMERIC;
 
     } else {
@@ -474,15 +558,17 @@ fncls_t GetFuncInfo (const char* Name, unsigned short* Use, unsigned short* Chg)
             }
             *Use = REG_ALL;
             *Chg = REG_ALL;
+            *Chg |= PSTATE_ALL;
         }
         return FNCLS_BUILTIN;
     }
 
     /* Function not found - assume that the primary register is input, and all
-    ** registers are changed
+    ** registers and processor flags are changed
     */
     *Use = REG_EAXY;
     *Chg = REG_ALL;
+    *Chg |= PSTATE_ALL;
 
     return FNCLS_UNKNOWN;
 }
@@ -845,6 +931,63 @@ cmp_t FindTosCmpCond (const char* Name)
     } else {
         /* Not found */
         return CMP_INV;
+    }
+}
+
+
+
+const char* GetCmpSuffix (cmp_t Cond)
+/* Return the compare suffix by the given a compare condition or 0 on failure */
+{
+    /* Check for the correct subroutine name */
+    if (Cond >= 0       &&
+        Cond != CMP_INV &&
+        (unsigned)Cond < sizeof (CmpSuffixTab) / sizeof (CmpSuffixTab[0])) {
+        return CmpSuffixTab[Cond];
+    } else {
+        /* Not found */
+        return 0;
+    }
+}
+
+
+
+char* GetBoolCmpSuffix (char* Buf, cmp_t Cond)
+/* Search for a boolean transformer subroutine (eg. booleq) by the given compare
+** condition.
+** Return the output buffer filled with the name of the correct subroutine or 0
+** on failure.
+*/
+{
+    /* Check for the correct boolean transformer subroutine name */
+    const char* Suf = GetCmpSuffix (Cond);
+
+    if (Suf != 0) {
+        sprintf (Buf, "bool%s", Suf);
+        return Buf;
+    } else {
+        /* Not found */
+        return 0;
+    }
+}
+
+
+
+char* GetTosCmpSuffix (char* Buf, cmp_t Cond)
+/* Search for a TOS compare function (eg. tosgtax) by the given compare condition.
+** Return the output buffer filled with the name of the correct function or 0 on
+** failure.
+*/
+{
+    /* Check for the correct TOS function name */
+    const char* Suf = GetCmpSuffix (Cond);
+
+    if (Suf != 0) {
+        sprintf (Buf, "tos%sax", Suf);
+        return Buf;
+    } else {
+        /* Not found */
+        return 0;
     }
 }
 

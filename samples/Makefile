@@ -151,6 +151,12 @@ else
 endif
 
 # --------------------------------------------------------------------------
+# Lists of subdirectories
+
+# disasm depends on cpp
+DIRLIST = tutorial geos
+
+# --------------------------------------------------------------------------
 # Lists of executables
 
 EXELIST_c64 =      \
@@ -209,10 +215,17 @@ ifndef EXELIST_$(SYS)
 EXELIST_$(SYS) := ${patsubst %.c,%,$(wildcard *.c)}
 endif
 
+define SUBDIR_recipe
+
+@$(MAKE) -C $(dir) --no-print-directory $@
+
+endef # SUBDIR_recipe
+
 # --------------------------------------------------------------------------
 # Rules to make the binaries and the disk
 
 samples: $(EXELIST_$(SYS))
+	$(foreach dir,$(DIRLIST),$(SUBDIR_recipe))
 
 disk: $(DISK_$(SYS))
 
@@ -248,17 +261,23 @@ endif
 # Rule to make a CBM disk with all samples. Needs the c1541 program that comes
 # with the VICE emulator.
 
-define D64_WRITE_recipe
+define D64_WRITE_PRG_recipe
 
-$(C1541) -attach $@ -write "$(subst ?,$(SPACE),$(file))" $(notdir $(file)) >$(NULLDEV)
+$(C1541) -attach $@ -write "$(subst ?,$(SPACE),$(file))" $(notdir $(file)),p >$(NULLDEV)
 
-endef # D64_WRITE_recipe
+endef # D64_WRITE_PRG_recipe
+
+define D64_WRITE_SEQ_recipe
+
+$(C1541) -attach $@ -write "$(subst ?,$(SPACE),$(file))" $(notdir $(file)),s >$(NULLDEV)
+
+endef # D64_WRITE_SEQ_recipe
 
 samples.d64: samples
 	@$(C1541) -format samples,AA d64 $@ >$(NULLDEV)
-	$(foreach file,$(EXELIST_$(SYS)),$(D64_WRITE_recipe))
-	$(foreach file,$(OVERLAYLIST),$(D64_WRITE_recipe))
-	$(foreach file,$(EMD) $(MOU) $(TGI),$(D64_WRITE_recipe))
+	$(foreach file,$(EXELIST_$(SYS)),$(D64_WRITE_PRG_recipe))
+	$(foreach file,$(OVERLAYLIST),$(D64_WRITE_PRG_recipe))
+	$(foreach file,$(EMD) $(MOU) $(TGI),$(D64_WRITE_SEQ_recipe))
 
 # --------------------------------------------------------------------------
 # Rule to make an Apple II disk with all samples. Needs the AppleCommander
@@ -318,7 +337,7 @@ install:
 	$(INSTALL) -d $(DESTDIR)$(samplesdir)/geos
 	$(INSTALL) -d $(DESTDIR)$(samplesdir)/tutorial
 	$(INSTALL) -m0644 *.* $(DESTDIR)$(samplesdir)
-	$(INSTALL) -m0644 README $(DESTDIR)$(samplesdir)
+	$(INSTALL) -m0644 readme.txt $(DESTDIR)$(samplesdir)
 	$(INSTALL) -m0644 Makefile $(DESTDIR)$(samplesdir)
 	$(INSTALL) -m0644 geos/*.* $(DESTDIR)$(samplesdir)/geos
 	$(INSTALL) -m0644 tutorial/*.* $(DESTDIR)$(samplesdir)/tutorial
@@ -338,3 +357,4 @@ mostlyclean:
 clean: mostlyclean
 	@$(DEL) $(EXELIST_$(SYS)) $(DISK_$(SYS)) 2>$(NULLDEV)
 	@$(DEL) multdemo.? ovrldemo.? 2>$(NULLDEV)
+	$(foreach dir,$(DIRLIST),$(SUBDIR_recipe))
