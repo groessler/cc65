@@ -74,9 +74,18 @@ static GenDesc GenOASGN  = { TOK_OR_ASSIGN,     GEN_NOPUSH,     g_or  };
 
 
 /*****************************************************************************/
-/*                             Helper functions                              */
+/*                           Forward declarations                            */
 /*****************************************************************************/
 
+
+
+static void parseadd (ExprDesc* Expr, int DoArrayRef);
+
+
+
+/*****************************************************************************/
+/*                             Helper functions                              */
+/*****************************************************************************/
 
 
 static unsigned GlobalModeFlags (const ExprDesc* Expr)
@@ -1333,294 +1342,6 @@ static void Primary (ExprDesc* E)
 
 
 
-static void ArrayRef (ExprDesc* Expr)
-/* Handle an array reference. This function needs a rewrite. */
-{
-    int         ConstBaseAddr;
-    ExprDesc    Subscript;
-    CodeMark    Mark1;
-    CodeMark    Mark2;
-    TypeCode    Qualifiers;
-    Type*       ElementType;
-    Type*       tptr1;
-
-    ED_Init (&Subscript);
-    Subscript.Flags |= Expr->Flags & E_MASK_KEEP_SUBEXPR;
-
-    /* Skip the bracket */
-    NextToken ();
-
-    /* Get the type of left side */
-    tptr1 = Expr->Type;
-
-    /* We can apply a special treatment for arrays that have a const base
-    ** address. This is true for most arrays and will produce a lot better
-    ** code. Check if this is a "quasi-const base" address.
-    */
-    ConstBaseAddr = ED_IsRVal (Expr) && ED_IsLocQuasiConst (Expr);
-
-    /* If we have a quasi-const base address, we delay the address fetch */
-    GetCodePos (&Mark1);
-    if (!ConstBaseAddr) {
-        /* Get a pointer to the array into the primary */
-        LoadExpr (CF_NONE, Expr);
-
-        /* Get the array pointer on stack. Do not push more than 16
-        ** bit, even if this value is greater, since we cannot handle
-        ** other than 16bit stuff when doing indexing.
-        */
-        GetCodePos (&Mark2);
-        g_push (CF_PTR, 0);
-    }
-
-    /* TOS now contains ptr to array elements. Get the subscript. */
-    MarkedExprWithCheck (hie0, &Subscript);
-
-    /* Check the types of array and subscript. We can either have a
-    ** pointer/array to the left, in which case the subscript must be of an
-    ** integer type, or we have an integer to the left, in which case the
-    ** subscript must be a pointer/array.
-    ** Since we do the necessary checking here, we can rely later on the
-    ** correct types.
-    */
-    Qualifiers = T_QUAL_NONE;
-    if (IsClassPtr (Expr->Type)) {
-        if (!IsClassInt (Subscript.Type))  {
-            Error ("Array subscript is not an integer");
-            /* To avoid any compiler errors, make the expression a valid int */
-            ED_MakeConstAbsInt (&Subscript, 0);
-        }
-        if (IsTypeArray (Expr->Type)) {
-            Qualifiers = GetQualifier (Expr->Type);
-        }
-        ElementType = Indirect (Expr->Type);
-    } else if (IsClassInt (Expr->Type)) {
-        if (!IsClassPtr (Subscript.Type)) {
-            Error ("Subscripted value is neither array nor pointer");
-            /* To avoid compiler errors, make the subscript a char[] at
-            ** address 0.
-            */
-            ED_MakeConstAbs (&Subscript, 0, GetCharArrayType (1));
-        } else if (IsTypeArray (Subscript.Type)) {
-            Qualifiers = GetQualifier (Subscript.Type);
-        }
-        ElementType = Indirect (Subscript.Type);
-    } else {
-        Error ("Cannot subscript");
-        /* To avoid compiler errors, fake both the array and the subscript, so
-        ** we can just proceed.
-        */
-        ED_MakeConstAbs (Expr, 0, GetCharArrayType (1));
-        ED_MakeConstAbsInt (&Subscript, 0);
-        ElementType = Indirect (Expr->Type);
-    }
-
-    /* The element type has the combined qualifiers from itself and the array,
-    ** it is a member of (if any).
-    */
-    if (GetQualifier (ElementType) != (GetQualifier (ElementType) | Qualifiers)) {
-        ElementType = TypeDup (ElementType);
-        ElementType->C |= Qualifiers;
-    }
-
-    /* If the subscript is a bit-field, load it and make it an rvalue */
-    if (ED_IsBitField (&Subscript)) {
-        LoadExpr (CF_NONE, &Subscript);
-        ED_FinalizeRValLoad (&Subscript);
-    }
-
-    /* Make the address of the array element from the base and subscript */
-    if (ED_IsConstAbs (&Subscript) && ED_CodeRangeIsEmpty (&Subscript)) {
-
-        /* The array subscript is a constant. Since we can have the element
-        ** address directly as base+offset, we can remove the array address
-        ** push onto the stack before if loading subscript doesn't tamper that
-        ** address in the primary.
-        */
-        if (!ConstBaseAddr) {
-            RemoveCode (&Mark2);
-        } else {
-            /* Get an array pointer into the primary */
-            LoadExpr (CF_NONE, Expr);
-        }
-
-        if (IsClassPtr (Expr->Type)) {
-
-            /* Lhs is pointer/array. Scale the subscript value according to
-            ** the element size.
-            */
-            Subscript.IVal *= CheckedSizeOf (ElementType);
-
-            /* Remove the address load code */
-            RemoveCode (&Mark1);
-
-            /* In case of an array, we can adjust the offset of the expression
-            ** already in Expr. If the base address was a constant, we can even
-            ** remove the code that loaded the address into the primary.
-            */
-            if (!IsTypeArray (Expr->Type)) {
-
-                /* It's a pointer, so we do have to load it into the primary
-                ** first (if it's not already there).
-                */
-                if (!ConstBaseAddr && ED_IsLVal (Expr)) {
-                    LoadExpr (CF_NONE, Expr);
-                    ED_FinalizeRValLoad (Expr);
-                }
-            }
-
-            /* Adjust the offset */
-            Expr->IVal += Subscript.IVal;
-
-        } else {
-
-            /* Scale the lhs value according to the element type */
-            g_scale (TypeOf (tptr1), CheckedSizeOf (ElementType));
-
-            /* Add the subscript. Since arrays are indexed by integers,
-            ** we will ignore the true type of the subscript here and
-            ** use always an int. #### Use offset but beware of LoadExpr!
-            */
-            g_inc (CF_INT | CF_CONST, Subscript.IVal);
-
-        }
-
-    } else {
-
-        /* Array subscript is not constant. Load it into the primary */
-        GetCodePos (&Mark2);
-        LoadExpr (CF_NONE, &Subscript);
-
-        /* Do scaling */
-        if (IsClassPtr (Expr->Type)) {
-
-            /* Indexing is based on unsigneds, so we will just use the integer
-            ** portion of the index (which is in (e)ax, so there's no further
-            ** action required).
-            */
-            g_scale (CF_INT, CheckedSizeOf (ElementType));
-
-        } else {
-
-            /* Get the int value on top. If we come here, we're sure, both
-            ** values are 16 bit (the first one was truncated if necessary
-            ** and the second one is a pointer). Note: If ConstBaseAddr is
-            ** true, we don't have a value on stack, so to "swap" both, just
-            ** push the subscript.
-            */
-            if (ConstBaseAddr) {
-                g_push (CF_INT, 0);
-                LoadExpr (CF_NONE, Expr);
-                ConstBaseAddr = 0;
-            } else {
-                g_swap (CF_INT);
-            }
-
-            /* Scale it */
-            g_scale (TypeOf (tptr1), CheckedSizeOf (ElementType));
-
-        }
-
-        /* The offset is now in the primary register. It we didn't have a
-        ** constant base address for the lhs, the lhs address is already
-        ** on stack, and we must add the offset. If the base address was
-        ** constant, we call special functions to add the address to the
-        ** offset value.
-        */
-        if (!ConstBaseAddr) {
-
-            /* The array base address is on stack and the subscript is in the
-            ** primary. Add both.
-            */
-            g_add (CF_INT, 0);
-
-        } else {
-
-            /* The subscript is in the primary, and the array base address is
-            ** in Expr. If the subscript has itself a constant address, it is
-            ** often a better idea to reverse again the order of the
-            ** evaluation. This will generate better code if the subscript is
-            ** a byte sized variable. But beware: This is only possible if the
-            ** subscript was not scaled, that is, if this was a byte array
-            ** or pointer.
-            */
-            if (ED_IsLocQuasiConst (&Subscript) &&
-                CheckedSizeOf (ElementType) == SIZEOF_CHAR) {
-
-                unsigned Flags;
-
-                /* Reverse the order of evaluation */
-                if (CheckedSizeOf (Subscript.Type) == SIZEOF_CHAR) {
-                    Flags = CF_CHAR;
-                } else {
-                    Flags = CF_INT;
-                }
-                RemoveCode (&Mark2);
-
-                /* Get a pointer to the array into the primary. */
-                LoadExpr (CF_NONE, Expr);
-
-                /* Add the variable */
-                if (ED_IsLocStack (&Subscript)) {
-                    g_addlocal (Flags, Subscript.IVal);
-                } else {
-                    Flags |= GlobalModeFlags (&Subscript);
-                    g_addstatic (Flags, Subscript.Name, Subscript.IVal);
-                }
-            } else {
-
-                if (ED_IsLocNone (Expr) ||
-                    (ED_IsLocAbs (Expr) && ED_IsAddrExpr (Expr))) {
-                    /* Constant numeric address. Just add it */
-                    g_inc (CF_INT, Expr->IVal);
-                } else if (ED_IsLocStack (Expr)) {
-                    /* Base address is a local variable address */
-                    if (ED_IsAddrExpr (Expr)) {
-                        g_addaddr_local (CF_INT, Expr->IVal);
-                    } else {
-                        g_addlocal (CF_PTR, Expr->IVal);
-                    }
-                } else {
-                    /* Base address is a static variable address */
-                    unsigned Flags = CF_INT | GlobalModeFlags (Expr);
-                    if (ED_IsAddrExpr (Expr)) {
-                        /* Add the address of the location */
-                        g_addaddr_static (Flags, Expr->Name, Expr->IVal);
-                    } else {
-                        /* Add the contents of the location */
-                        g_addstatic (Flags, Expr->Name, Expr->IVal);
-                    }
-                }
-            }
-        }
-
-        /* The address of the element is an rvalue in the primary */
-        ED_FinalizeRValLoad (Expr);
-
-    }
-
-    /* The final result is usually an lvalue expression of element type
-    ** referenced in the primary, unless it is once again an array. We can just
-    ** assume the usual case first, and change it later if necessary.
-    */
-    ED_IndExpr (Expr);
-    Expr->Type = ElementType;
-
-    /* An array element is actually a variable. So the rules for variables with
-    ** respect to the reference type apply: If it's an array, it is virtually
-    ** an rvalue address, otherwise it's an lvalue reference. (A function would
-    ** also be an rvalue address, but an array cannot contain functions).
-    */
-    if (IsTypeArray (Expr->Type)) {
-        ED_AddrExpr (Expr);
-    }
-
-    /* Consume the closing bracket */
-    ConsumeRBrack ();
-}
-
-
-
 static void StructRef (ExprDesc* Expr)
 /* Process struct/union field after . or ->. */
 {
@@ -1793,7 +1514,7 @@ static void hie11 (ExprDesc *Expr)
 
             case TOK_LBRACK:
                 /* Array reference */
-                ArrayRef (Expr);
+                parseadd (Expr, 1);
                 break;
 
             case TOK_LPAREN:
@@ -2640,7 +2361,6 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
                          void (*hienext) (ExprDesc*))
 /* Helper function for the compare operators */
 {
-    CodeMark Mark0;
     CodeMark Mark1;
     CodeMark Mark2;
     const GenDesc* Gen;
@@ -2649,7 +2369,6 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
     int rconst;                         /* Operand is a constant */
 
 
-    GetCodePos (&Mark0);
     ExprWithCheck (hienext, Expr);
 
     while ((Gen = FindGen (CurTok.Tok, Ops)) != 0) {
@@ -2674,11 +2393,11 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
         GetCodePos (&Mark1);
         ltype = TypeOf (Expr->Type);
         if (ED_IsConstAbs (Expr)) {
-            /* Constant value */
+            /* Numeric constant value */
             GetCodePos (&Mark2);
             g_push (ltype | CF_CONST, Expr->IVal);
         } else {
-            /* Value not constant */
+            /* Value not numeric constant */
             LoadExpr (CF_NONE, Expr);
             GetCodePos (&Mark2);
             g_push (ltype, 0);
@@ -2692,10 +2411,10 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
             Expr2.Type = PointerTo (Expr2.Type);
         }
 
-        /* Check for a constant expression */
+        /* Check for a numeric constant expression */
         rconst = (ED_IsConstAbs (&Expr2) && ED_CodeRangeIsEmpty (&Expr2));
         if (!rconst) {
-            /* Not constant, load into the primary */
+            /* Not numeric constant, load into the primary */
             LoadExpr (CF_NONE, &Expr2);
         }
 
@@ -2754,10 +2473,76 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
             }
         }
 
-        /* Check for const operands */
-        if (ED_IsConstAbs (Expr) && rconst) {
+        /* Check for numeric constant operands */
+        if ((ED_IsAddrExpr (Expr) && ED_IsNullPtr (&Expr2)) ||
+            (ED_IsNullPtr (Expr) && ED_IsAddrExpr (&Expr2))) {
 
-            /* Both operands are constant, remove the generated code */
+            /* Object addresses are inequal to null pointer */
+            Expr->IVal = (Tok != TOK_EQ);
+            if (ED_IsNullPtr (&Expr2)) {
+                if (Tok == TOK_LT || Tok == TOK_LE) {
+                    Expr->IVal = 0;
+                }
+            } else {
+                if (Tok == TOK_GT || Tok == TOK_GE) {
+                    Expr->IVal = 0;
+                }
+            }
+
+            /* Get rid of unwanted flags */
+            ED_MakeConstBool (Expr, Expr->IVal);
+
+            /* The result is constant, this is suspicious when not in
+            ** preprocessor mode.
+            */
+            WarnConstCompareResult (Expr);
+
+            if (ED_CodeRangeIsEmpty (&Expr2)) {
+                /* Both operands are static, remove the load code */
+                RemoveCode (&Mark1);
+            } else {
+                /* Drop pushed lhs */
+                g_drop (sizeofarg (ltype));
+                pop (ltype);
+            }
+
+        } else if (ED_IsAddrExpr (Expr)     &&
+                   ED_IsAddrExpr (&Expr2)   &&
+                   Expr->Sym == Expr2.Sym) {
+
+            /* Evaluate the result for static addresses */
+            unsigned long Val1 = Expr->IVal;
+            unsigned long Val2 = Expr2.IVal;
+            switch (Tok) {
+                case TOK_EQ: Expr->IVal = (Val1 == Val2);   break;
+                case TOK_NE: Expr->IVal = (Val1 != Val2);   break;
+                case TOK_LT: Expr->IVal = (Val1 < Val2);    break;
+                case TOK_LE: Expr->IVal = (Val1 <= Val2);   break;
+                case TOK_GE: Expr->IVal = (Val1 >= Val2);   break;
+                case TOK_GT: Expr->IVal = (Val1 > Val2);    break;
+                default:     Internal ("hie_compare: got token 0x%X\n", Tok);
+            }
+
+            /* Get rid of unwanted flags */
+            ED_MakeConstBool (Expr, Expr->IVal);
+
+            /* If the result is constant, this is suspicious when not in
+            ** preprocessor mode.
+            */
+            WarnConstCompareResult (Expr);
+
+            if (ED_CodeRangeIsEmpty (&Expr2)) {
+                /* Both operands are static, remove the load code */
+                RemoveCode (&Mark1);
+            } else {
+                /* Drop pushed lhs */
+                g_drop (sizeofarg (ltype));
+                pop (ltype);
+            }
+
+        } else if (ED_IsConstAbs (Expr) && rconst) {
+
+            /* Both operands are numeric constant, remove the generated code */
             RemoveCode (&Mark1);
 
             /* Determine if this is a signed or unsigned compare */
@@ -2800,33 +2585,6 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
             ** preprocessor mode.
             */
             WarnConstCompareResult (Expr);
-
-        } else if (ED_CodeRangeIsEmpty (&Expr2) &&
-                   ((ED_IsAddrExpr (Expr) && ED_IsNullPtr (&Expr2)) ||
-                    (ED_IsNullPtr (Expr) && (ED_IsAddrExpr (&Expr2))))) {
-
-            /* Object addresses are inequal to null pointer */
-            Expr->IVal = (Tok != TOK_EQ);
-            if (ED_IsNullPtr (&Expr2)) {
-                if (Tok == TOK_LT || Tok == TOK_LE) {
-                    Expr->IVal = 0;
-                }
-            } else {
-                if (Tok == TOK_GT || Tok == TOK_GE) {
-                    Expr->IVal = 0;
-                }
-            }
-
-            /* Get rid of unwanted flags */
-            ED_MakeConstBool (Expr, Expr->IVal);
-
-            /* If the result is constant, this is suspicious when not in
-            ** preprocessor mode.
-            */
-            WarnConstCompareResult (Expr);
-
-            /* Both operands are static, remove the generated code */
-            RemoveCode (&Mark1);
 
         } else {
 
@@ -3034,10 +2792,11 @@ static void hie9 (ExprDesc *Expr)
 
 
 
-static void parseadd (ExprDesc* Expr)
-/* Parse an expression with the binary plus operator. Expr contains the
-** unprocessed left hand side of the expression and will contain the
-** result of the expression on return.
+static void parseadd (ExprDesc* Expr, int DoArrayRef)
+/* Parse an expression with the binary plus or subscript operator. Expr contains
+** the unprocessed left hand side of the expression and will contain the result
+** of the expression on return. If DoArrayRef is zero, this evaluates the binary
+** plus operation. Otherwise, this evaluates the subscript operation.
 */
 {
     ExprDesc Expr2;
@@ -3045,54 +2804,148 @@ static void parseadd (ExprDesc* Expr)
     CodeMark Mark;              /* Remember code position */
     Type* lhst;                 /* Type of left hand side */
     Type* rhst;                 /* Type of right hand side */
+    int lscale;
+    int rscale;
+    int AddDone;                /* No need to generate runtime code */
 
     ED_Init (&Expr2);
     Expr2.Flags |= Expr->Flags & E_MASK_KEEP_SUBEXPR;
 
-    /* Skip the PLUS token */
+    /* Skip the PLUS or opening bracket token */
     NextToken ();
 
     /* Get the left hand side type, initialize operation flags */
     lhst = Expr->Type;
     flags = 0;
+    lscale = rscale = 1;
+    AddDone = 0;
 
-    /* Check for constness on both sides */
-    if (ED_IsConst (Expr)) {
+    /* We can only do constant expressions for:
+    ** - integer addition:
+    **   - numeric + numeric
+    **   - (integer)(base + offset) + numeric
+    **   - numeric + (integer)(base + offset)
+    ** - pointer offset:
+    **   - (pointer)numeric + numeric * scale
+    **   - (base + offset) + numeric * scale
+    **   - (pointer)numeric + (integer)(base + offset) * 1
+    **   - numeric * scale + (pointer)numeric
+    **   - numeric * scale + (base + offset)
+    **   - (integer)(base + offset) * 1 + (pointer)numeric
+    */
+    if (ED_IsQuasiConst (Expr)) {
 
         /* The left hand side is a constant of some sort. Good. Get rhs */
-        ExprWithCheck (hie9, &Expr2);
-        if (ED_IsConstAbs (&Expr2)) {
+        ExprWithCheck (DoArrayRef ? hie0 : hie9, &Expr2);
 
-            /* Right hand side is a constant numeric value. Get the rhs type */
-            rhst = Expr2.Type;
+        /* Right hand side is constant. Get the rhs type */
+        rhst = Expr2.Type;
+        if (ED_IsQuasiConst (&Expr2)) {
 
             /* Both expressions are constants. Check for pointer arithmetic */
             if (IsClassPtr (lhst) && IsClassInt (rhst)) {
                 /* Left is pointer, right is int, must scale rhs */
-                Expr->IVal += Expr2.IVal * CheckedPSizeOf (lhst);
-                /* Result type is a pointer */
+                rscale = CheckedPSizeOf (lhst);
+                /* Operate on pointers, result type is a pointer */
+                flags = CF_PTR;
             } else if (IsClassInt (lhst) && IsClassPtr (rhst)) {
                 /* Left is int, right is pointer, must scale lhs */
-                Expr->IVal = Expr->IVal * CheckedPSizeOf (rhst) + Expr2.IVal;
-                /* Result type is a pointer */
-                Expr->Type = Expr2.Type;
-            } else if (IsClassInt (lhst) && IsClassInt (rhst)) {
+                lscale = CheckedPSizeOf (rhst);
+                /* Operate on pointers, result type is a pointer */
+                flags = CF_PTR;
+            } else if (!DoArrayRef && IsClassInt (lhst) && IsClassInt (rhst)) {
                 /* Integer addition */
-                Expr->IVal += Expr2.IVal;
-                typeadjust (Expr, &Expr2, 1);
-
-                /* Limit the calculated value to the range of its type */
-                LimitExprValue (Expr);
+                flags = CF_INT;
             } else {
                 /* OOPS */
-                Error ("Invalid operands for binary operator '+'");
+                AddDone = -1;
+            }
+
+            if (ED_IsAbs (&Expr2) &&
+                (ED_IsAbs (Expr) || lscale == 1)) {
+                if (IsClassInt (lhst) && IsClassInt (rhst)) {
+                    typeadjust (Expr, &Expr2, 1);
+                }
+                Expr->IVal = Expr->IVal * lscale + Expr2.IVal * rscale;
+                AddDone = 1;
+            } else if (ED_IsAbs (Expr) &&
+                (ED_IsAbs (&Expr2) || rscale == 1)) {
+                if (IsClassInt (lhst) && IsClassInt (rhst)) {
+                    typeadjust (&Expr2, Expr, 1);
+                }
+                Expr2.IVal = Expr->IVal * lscale + Expr2.IVal * rscale;
+                /* Adjust the flags */
+                Expr2.Flags |= Expr->Flags & ~E_MASK_KEEP_SUBEXPR;
+                /* Get the symbol and the name */
+                *Expr = Expr2;
+                AddDone = 1;
+            }
+
+            if (AddDone) {
+                /* Adjust the result for addition */
+                if (!DoArrayRef) {
+                    if (IsClassPtr (lhst)) {
+                        /* Result type is a pointer */
+                        Expr->Type = lhst;
+                    } else if (IsClassPtr (rhst)) {
+                        /* Result type is a pointer */
+                        Expr->Type = rhst;
+                    } else {
+                        /* Limit the calculated value to the range of its type */
+                        LimitExprValue (Expr);
+                    }
+
+                    /* The result is always an rvalue */
+                    ED_MarkExprAsRVal (Expr);
+                }
+            } else {
+                /* Decide the order */
+                if (!ED_IsAbs (&Expr2) && rscale > 1) {
+                    /* Rhs needs scaling but is not numeric. Load it. */
+                    LoadExpr (CF_NONE, &Expr2);
+                    /* Scale rhs */
+                    g_scale (CF_INT, rscale);
+                    /* Generate the code for the add */
+                    if (ED_IsAbs (Expr)) {
+                        /* Numeric constant */
+                        g_inc (flags | CF_CONST, Expr->IVal);
+                    } else if (ED_IsLocStack (Expr)) {
+                        /* Local stack address */
+                        g_addaddr_local (flags, Expr->IVal);
+                    } else {
+                        /* Static address */
+                        g_addaddr_static (flags | GlobalModeFlags (Expr), Expr->Name, Expr->IVal);
+                    }
+                } else {
+                    /* Lhs is not numeric. Load it. */
+                    LoadExpr (CF_NONE, Expr);
+                    /* Scale lhs if necessary */
+                    if (lscale != 1) {
+                        g_scale (CF_INT, lscale);
+                    }
+                    /* Generate the code for the add */
+                    if (ED_IsAbs (&Expr2)) {
+                        /* Numeric constant */
+                        g_inc (flags | CF_CONST, Expr2.IVal);
+                    } else if (ED_IsLocStack (&Expr2)) {
+                        /* Local stack address */
+                        g_addaddr_local (flags, Expr2.IVal);
+                    } else {
+                        /* Static address */
+                        g_addaddr_static (flags | GlobalModeFlags (&Expr2), Expr2.Name, Expr2.IVal);
+                    }
+                }
+
+                /* Result is an rvalue in primary register */
+                ED_FinalizeRValLoad (Expr);
             }
 
         } else {
 
-            /* lhs is a constant and rhs is not constant. Load rhs into
-            ** the primary.
+            /* lhs is constant and rhs is not constant. Load rhs into the
+            ** primary.
             */
+            GetCodePos (&Mark);
             LoadExpr (CF_NONE, &Expr2);
 
             /* Beware: The check above (for lhs) lets not only pass numeric
@@ -3100,11 +2953,8 @@ static void parseadd (ExprDesc* Expr)
             ** with an offset. We have to check for that here.
             */
 
-            /* First, get the rhs type. */
-            rhst = Expr2.Type;
-
             /* Setup flags */
-            if (ED_IsLocNone (Expr)) {
+            if (ED_IsAbs (Expr)) {
                 /* A numerical constant */
                 flags |= CF_CONST;
             } else {
@@ -3115,64 +2965,72 @@ static void parseadd (ExprDesc* Expr)
             /* Check for pointer arithmetic */
             if (IsClassPtr (lhst) && IsClassInt (rhst)) {
                 /* Left is pointer, right is int, must scale rhs */
-                g_scale (CF_INT, CheckedPSizeOf (lhst));
+                rscale = CheckedPSizeOf (lhst);
+                g_scale (CF_INT, rscale);
                 /* Operate on pointers, result type is a pointer */
                 flags |= CF_PTR;
-                /* Generate the code for the add */
-                if (ED_GetLoc (Expr) == E_LOC_NONE) {
-                    /* Numeric constant */
-                    g_inc (flags, Expr->IVal);
-                } else {
-                    /* Constant address */
-                    g_addaddr_static (flags, Expr->Name, Expr->IVal);
-                }
             } else if (IsClassInt (lhst) && IsClassPtr (rhst)) {
-
                 /* Left is int, right is pointer, must scale lhs. */
-                unsigned ScaleFactor = CheckedPSizeOf (rhst);
-
+                lscale = CheckedPSizeOf (rhst);
                 /* Operate on pointers, result type is a pointer */
                 flags |= CF_PTR;
                 Expr->Type = Expr2.Type;
-
-                /* Since we do already have rhs in the primary, if lhs is
-                ** not a numeric constant, and the scale factor is not one
-                ** (no scaling), we must take the long way over the stack.
-                */
-                if (ED_IsLocNone (Expr)) {
-                    /* Numeric constant, scale lhs */
-                    Expr->IVal *= ScaleFactor;
-                    /* Generate the code for the add */
-                    g_inc (flags, Expr->IVal);
-                } else if (ScaleFactor == 1) {
-                    /* Constant address but no need to scale */
-                    g_addaddr_static (flags, Expr->Name, Expr->IVal);
-                } else {
-                    /* Constant address that must be scaled */
-                    g_push (TypeOf (Expr2.Type), 0);    /* rhs --> stack */
-                    g_getimmed (flags, Expr->Name, Expr->IVal);
-                    g_scale (CF_PTR, ScaleFactor);
-                    g_add (CF_PTR, 0);
-                }
-            } else if (IsClassInt (lhst) && IsClassInt (rhst)) {
+            } else if (!DoArrayRef && IsClassInt (lhst) && IsClassInt (rhst)) {
                 /* Integer addition */
                 flags |= typeadjust (Expr, &Expr2, 1);
-                /* Generate the code for the add */
-                if (ED_IsLocNone (Expr)) {
-                    /* Numeric constant */
-                    g_inc (flags, Expr->IVal);
-                } else {
-                    /* Constant address */
-                    g_addaddr_static (flags, Expr->Name, Expr->IVal);
-                }
             } else {
                 /* OOPS */
-                Error ("Invalid operands for binary operator '+'");
-                flags = CF_INT;
+                AddDone = -1;
             }
 
-            /* Array and function types must be converted to pointer types */
-            Expr->Type = PtrConversion (Expr->Type);
+            /* Generate the code for the add */
+            if (!AddDone) {
+                if (ED_IsAbs (Expr) &&
+                    Expr->IVal >= 0 &&
+                    Expr->IVal * lscale < 256) {
+                    /* Numeric constant */
+                    g_inc (flags, Expr->IVal * lscale);
+                    AddDone = 1;
+                }
+            }
+
+            if (!AddDone) {
+                if (ED_IsLocQuasiConst (&Expr2) &&
+                    rscale == 1                 &&
+                    CheckedSizeOf (rhst) == SIZEOF_CHAR) {
+                    /* Change the order back */
+                    RemoveCode (&Mark);
+                    /* Load lhs */
+                    LoadExpr (CF_NONE, Expr);
+                    /* Use new flags */
+                    flags = CF_CHAR | GlobalModeFlags (&Expr2);
+                    /* Add the variable */
+                    if (ED_IsLocStack (&Expr2)) {
+                        g_addlocal (flags, Expr2.IVal);
+                    } else {
+                        g_addstatic (flags, Expr2.Name, Expr2.IVal);
+                    }
+                } else if (ED_IsAbs (Expr)) {
+                    /* Numeric constant */
+                    g_inc (flags, Expr->IVal * lscale);
+                } else if (lscale == 1) {
+                    if (ED_IsLocStack (Expr)) {
+                        /* Constant address */
+                        g_addaddr_local (flags, Expr->IVal);
+                    } else {
+                        g_addaddr_static (flags, Expr->Name, Expr->IVal);
+                    }
+                } else {
+                    /* Since we do already have rhs in the primary, if lhs is
+                    ** not a numeric constant, and the scale factor is not one
+                    ** (no scaling), we must take the long way over the stack.
+                    */
+                    g_push (TypeOf (Expr2.Type), 0);    /* rhs --> stack */
+                    LoadExpr (CF_NONE, Expr);
+                    g_scale (CF_PTR, lscale);
+                    g_add (CF_PTR, 0);
+                }
+            }
 
             /* Result is an rvalue in primary register */
             ED_FinalizeRValLoad (Expr);
@@ -3181,20 +3039,21 @@ static void parseadd (ExprDesc* Expr)
     } else {
 
         /* Left hand side is not constant. Get the value onto the stack. */
-        LoadExpr (CF_NONE, Expr);              /* --> primary register */
+        LoadExpr (CF_NONE, Expr);               /* --> primary register */
         GetCodePos (&Mark);
-        g_push (TypeOf (Expr->Type), 0);        /* --> stack */
+        flags = TypeOf (Expr->Type);            /* default codegen type */
+        g_push (flags, 0);                      /* --> stack */
 
         /* Evaluate the rhs */
-        MarkedExprWithCheck (hie9, &Expr2);
+        MarkedExprWithCheck (DoArrayRef ? hie0 : hie9, &Expr2);
+
+        /* Get the rhs type */
+        rhst = Expr2.Type;
 
         /* Check for a constant rhs expression */
         if (ED_IsConstAbs (&Expr2) && ED_CodeRangeIsEmpty (&Expr2)) {
 
-            /* Right hand side is a constant. Get the rhs type */
-            rhst = Expr2.Type;
-
-            /* Remove pushed value from stack */
+            /* Rhs is a constant. Remove pushed lhs from stack. */
             RemoveCode (&Mark);
 
             /* Check for pointer arithmetic */
@@ -3209,13 +3068,12 @@ static void parseadd (ExprDesc* Expr)
                 /* Operate on pointers, result type is a pointer */
                 flags = CF_PTR;
                 Expr->Type = Expr2.Type;
-            } else if (IsClassInt (lhst) && IsClassInt (rhst)) {
+            } else if (!DoArrayRef && IsClassInt (lhst) && IsClassInt (rhst)) {
                 /* Integer addition */
                 flags = typeadjust (Expr, &Expr2, 1);
             } else {
                 /* OOPS */
-                Error ("Invalid operands for binary operator '+'");
-                flags = CF_INT;
+                AddDone = -1;
             }
 
             /* Generate code for the add */
@@ -3223,27 +3081,41 @@ static void parseadd (ExprDesc* Expr)
 
         } else {
 
-            /* Not constant, load into the primary */
-            LoadExpr (CF_NONE, &Expr2);
-
-            /* lhs and rhs are not constant. Get the rhs type. */
-            rhst = Expr2.Type;
-
-            /* Check for pointer arithmetic */
+            /* Lhs and rhs are not so constant. Check for pointer arithmetic. */
             if (IsClassPtr (lhst) && IsClassInt (rhst)) {
                 /* Left is pointer, right is int, must scale rhs */
-                g_scale (CF_INT, CheckedPSizeOf (lhst));
+                rscale = CheckedPSizeOf (lhst);
+                if (ED_IsAbs (&Expr2)) {
+                    Expr2.IVal *= rscale;
+                    /* Load rhs into the primary */
+                    LoadExpr (CF_NONE, &Expr2);
+                } else {
+                    /* Load rhs into the primary */
+                    LoadExpr (CF_NONE, &Expr2);
+                    g_scale (CF_INT, rscale);
+                }
                 /* Operate on pointers, result type is a pointer */
                 flags = CF_PTR;
             } else if (IsClassInt (lhst) && IsClassPtr (rhst)) {
                 /* Left is int, right is pointer, must scale lhs */
-                g_tosint (TypeOf (lhst));       /* Make sure TOS is int */
-                g_swap (CF_INT);                /* Swap TOS and primary */
-                g_scale (CF_INT, CheckedPSizeOf (rhst));
+                lscale = CheckedPSizeOf (rhst);
+                if (ED_CodeRangeIsEmpty (&Expr2)) {
+                    RemoveCode (&Mark);             /* Remove pushed value from stack */
+                    g_scale (CF_INT, lscale);
+                    g_push (CF_PTR, 0);             /* --> stack */
+                    LoadExpr (CF_NONE, &Expr2);     /* Load rhs into primary register */
+                } else {
+                    g_tosint (TypeOf (lhst));       /* Make sure TOS is int */
+                    LoadExpr (CF_NONE, &Expr2);     /* Load rhs into primary register */
+                    if (lscale != 1) {
+                        g_swap (CF_INT);            /* Swap TOS and primary */
+                        g_scale (CF_INT, CheckedPSizeOf (rhst));
+                    }
+                }
                 /* Operate on pointers, result type is a pointer */
                 flags = CF_PTR;
                 Expr->Type = Expr2.Type;
-            } else if (IsClassInt (lhst) && IsClassInt (rhst)) {
+            } else if (!DoArrayRef && IsClassInt (lhst) && IsClassInt (rhst)) {
                 /* Integer addition. Note: Result is never constant.
                 ** Problem here is that typeadjust does not know if the
                 ** variable is an rvalue or lvalue, so if both operands
@@ -3254,10 +3126,12 @@ static void parseadd (ExprDesc* Expr)
                 ** when trying to apply another solution.
                 */
                 flags = typeadjust (Expr, &Expr2, 0) & ~CF_CONST;
+                /* Load rhs into the primary */
+                LoadExpr (CF_NONE, &Expr2);
             } else {
                 /* OOPS */
-                Error ("Invalid operands for binary operator '+'");
-                flags = CF_INT;
+                AddDone = -1;
+                /* We can't just goto End as that would leave the stack unbalanced */
             }
 
             /* Generate code for the add */
@@ -3267,6 +3141,67 @@ static void parseadd (ExprDesc* Expr)
 
         /* Result is an rvalue in primary register */
         ED_FinalizeRValLoad (Expr);
+    }
+
+    /* Deal with array ref */
+    if (DoArrayRef) {
+        TypeCode Qualifiers = T_QUAL_NONE;
+        Type* ElementType;
+
+        /* Check the types of array and subscript */
+        if (IsClassPtr (lhst)) {
+            if (!IsClassInt (rhst))  {
+                Error ("Array subscript is not an integer");
+                ED_MakeConstAbs (Expr, 0, GetCharArrayType (1));
+            } else if (IsTypeArray (lhst)) {
+                Qualifiers = GetQualifier (lhst);
+            }
+        } else if (IsClassInt (lhst)) {
+            if (!IsClassPtr (rhst)) {
+                Error ("Subscripted value is neither array nor pointer");
+                ED_MakeConstAbs (Expr, 0, GetCharArrayType (1));
+            } else if (IsTypeArray (rhst)) {
+                Qualifiers = GetQualifier (rhst);
+            }
+        } else {
+            Error ("Cannot subscript");
+            ED_MakeConstAbs (Expr, 0, GetCharArrayType (1));
+        }
+
+        /* The element type has the combined qualifiers from itself and the array,
+        ** it is a member of (if any).
+        */
+        ElementType = Indirect (Expr->Type);
+        if (GetQualifier (ElementType) != (GetQualifier (ElementType) | Qualifiers)) {
+            ElementType = TypeDup (ElementType);
+            ElementType->C |= Qualifiers;
+        }
+
+        /* The final result is usually an lvalue expression of element type
+        ** referenced in the primary, unless it is once again an array. We can just
+        ** assume the usual case first, and change it later if necessary.
+        */
+        ED_IndExpr (Expr);
+        Expr->Type = ElementType;
+
+        /* An array element is actually a variable. So the rules for variables with
+        ** respect to the reference type apply: If it's an array, it is virtually
+        ** an rvalue address, otherwise it's an lvalue reference. (A function would
+        ** also be an rvalue address, but an array cannot contain functions).
+        */
+        if (IsTypeArray (Expr->Type)) {
+            ED_AddrExpr (Expr);
+        }
+
+        /* Consume the closing bracket */
+        ConsumeRBrack ();
+    } else {
+        if (AddDone < 0) {
+            Error ("Invalid operands for binary operator '+'");
+        } else {
+            /* Array and function types must be converted to pointer types */
+            Expr->Type = PtrConversion (Expr->Type);
+        }
     }
 
     /* Condition code not set */
@@ -3287,7 +3222,8 @@ static void parsesub (ExprDesc* Expr)
     Type* rhst;                 /* Type of right hand side */
     CodeMark Mark1;             /* Save position of output queue */
     CodeMark Mark2;             /* Another position in the queue */
-    int rscale;                 /* Scale factor for the result */
+    int rscale;                 /* Scale factor for pointer arithmetics */
+    int SubDone;                /* No need to generate runtime code */
 
     ED_Init (&Expr2);
     Expr2.Flags |= Expr->Flags & E_MASK_KEEP_SUBEXPR;
@@ -3304,11 +3240,13 @@ static void parsesub (ExprDesc* Expr)
 
     /* Get the left hand side type, initialize operation flags */
     lhst = Expr->Type;
+    flags = CF_INT;             /* Default result type */
     rscale = 1;                 /* Scale by 1, that is, don't scale */
+    SubDone = 0;                /* Generate runtime code by default */
 
     /* Remember the output queue position, then bring the value onto the stack */
     GetCodePos (&Mark1);
-    LoadExpr (CF_NONE, Expr);  /* --> primary register */
+    LoadExpr (CF_NONE, Expr);   /* --> primary register */
     GetCodePos (&Mark2);
     g_push (TypeOf (lhst), 0);  /* --> stack */
 
@@ -3322,67 +3260,148 @@ static void parsesub (ExprDesc* Expr)
         Expr2.Type = type_uchar;
     }
 
-    /* Check for a constant rhs expression */
-    if (ED_IsConstAbs (&Expr2) && ED_CodeRangeIsEmpty (&Expr2)) {
+    /* Get the rhs type */
+    rhst = Expr2.Type;
 
-        /* The right hand side is constant. Get the rhs type. */
-        rhst = Expr2.Type;
+    /* We can only do constant expressions for:
+    ** - integer subtraction:
+    **   - numeric - numeric
+    **   - (integer)(base + offset) - numeric
+    **   - (integer)(same_base + offset) - (integer)(same_base + offset)
+    ** - pointer offset:
+    **   - (pointer)numeric - numeric * scale
+    **   - (base + offset) - numeric * scale
+    **   - (same_base + offset) - (integer)(same_base + offset) * 1
+    ** - pointer diff:
+    **   - (numeric - numeric) / scale
+    **   - ((same_base + offset) - (same_base + offset)) / scale
+    **   - ((base + offset) - (pointer)numeric) / 1
+    */
+    if (IsClassPtr (lhst) && IsClassPtr (rhst)) {
 
-        /* Check left hand side */
-        if (ED_IsConstAbs (Expr)) {
+        /* Pointer diff */
+        if (TypeCmp (Indirect (lhst), Indirect (rhst)) < TC_QUAL_DIFF) {
+            Error ("Incompatible pointer types");
+        }
 
-            /* Both sides are constant, remove generated code */
+        /* Operate on pointers, result type is an integer */
+        flags = CF_PTR;
+        Expr->Type = type_int;
+
+        /* We'll have to scale the result */
+        rscale = CheckedPSizeOf (lhst);
+
+        /* Check for a constant rhs expression */
+        if (ED_IsQuasiConst (&Expr2) && ED_CodeRangeIsEmpty (&Expr2)) {
+            /* The right hand side is constant. Check left hand side. */
+            if (ED_IsQuasiConst (Expr)) {
+                /* We can't do all 'ptr1 - ptr2' constantly at the moment */
+                if (Expr->Sym == Expr2.Sym) {
+                    Expr->IVal = (Expr->IVal - Expr2.IVal) / rscale;
+                    /* Get rid of unneeded flags etc. */
+                    ED_MakeConstAbsInt (Expr, Expr->IVal);
+                    /* No runtime code */
+                    SubDone = 1;
+                } else if (rscale == 1 && ED_IsConstAbs (&Expr2)) {
+                    Expr->IVal = (Expr->IVal - Expr2.IVal) / rscale;
+                    /* No runtime code */
+                    SubDone = 1;
+                }
+            }
+        }
+
+        if (!SubDone) {
+            /* We'll do runtime code */
+            if (ED_IsConstAbs (&Expr2) && ED_CodeRangeIsEmpty (&Expr2)) {
+                /* Remove pushed value from stack */
+                RemoveCode (&Mark2);
+                /* Do the subtraction */
+                g_dec (CF_INT | CF_CONST, Expr2.IVal);
+            } else {
+                /* load into the primary */
+                LoadExpr (CF_NONE, &Expr2);
+                /* Generate code for the sub */
+                g_sub (CF_INT, 0);
+            }
+            /* We must scale the result */
+            if (rscale != 1) {
+                g_scale (CF_INT, -rscale);
+            }
+            /* Result is an rvalue in the primary register */
+            ED_FinalizeRValLoad (Expr);
+        } else {
+            /* Remove pushed value from stack */
             RemoveCode (&Mark1);
+            /* The result is always an rvalue */
+            ED_MarkExprAsRVal (Expr);
+        }
 
-            /* Check for pointer arithmetic */
+    } else if (ED_IsQuasiConst (&Expr2) && ED_CodeRangeIsEmpty (&Expr2)) {
+
+        /* Right hand side is constant. Check left hand side. */
+        if (ED_IsQuasiConst (Expr)) {
+
+            /* Both sides are constant. Check for pointer arithmetic */
             if (IsClassPtr (lhst) && IsClassInt (rhst)) {
                 /* Left is pointer, right is int, must scale rhs */
-                Expr->IVal -= Expr2.IVal * CheckedPSizeOf (lhst);
+                rscale = CheckedPSizeOf (lhst);
                 /* Operate on pointers, result type is a pointer */
-            } else if (IsClassPtr (lhst) && IsClassPtr (rhst)) {
-                /* Left is pointer, right is pointer, must scale result */
-                if (TypeCmp (Indirect (lhst), Indirect (rhst)) < TC_QUAL_DIFF) {
-                    Error ("Incompatible pointer types");
-                } else {
-                    Expr->IVal = (Expr->IVal - Expr2.IVal) /
-                                      (long)CheckedPSizeOf (lhst);
-                }
-                /* Operate on pointers, result type is an integer */
-                Expr->Type = type_int;
+                flags = CF_PTR;
             } else if (IsClassInt (lhst) && IsClassInt (rhst)) {
                 /* Integer subtraction */
-                typeadjust (Expr, &Expr2, 1);
-                Expr->IVal -= Expr2.IVal;
-
-                /* Limit the calculated value to the range of its type */
-                LimitExprValue (Expr);
+                flags = typeadjust (Expr, &Expr2, 1);
             } else {
                 /* OOPS */
                 Error ("Invalid operands for binary operator '-'");
             }
 
+            /* We can't make all subtraction expressions constant */
+            if (ED_IsConstAbs (&Expr2)) {
+                Expr->IVal -= Expr2.IVal * rscale;
+                /* No runtime code */
+                SubDone = 1;
+            } else if (rscale == 1 && Expr->Sym == Expr2.Sym) {
+                /* The result is the diff of the offsets */
+                Expr->IVal -= Expr2.IVal;
+                /* Get rid of unneeded bases and flags etc. */
+                ED_MakeConstAbs (Expr, Expr->IVal, Expr->Type);
+                /* No runtime code */
+                SubDone = 1;
+            }
+
+            if (SubDone) {
+                /* Remove pushed value from stack */
+                RemoveCode (&Mark1);
+                if (IsClassInt (lhst)) {
+                    /* Limit the calculated value to the range of its type */
+                    LimitExprValue (Expr);
+                }
+                /* The result is always an rvalue */
+                ED_MarkExprAsRVal (Expr);
+            } else {
+                if (ED_IsConstAbs (&Expr2)) {
+                    /* Remove pushed value from stack */
+                    RemoveCode (&Mark2);
+                    /* Do the subtraction */
+                    g_dec (flags | CF_CONST, Expr2.IVal);
+                } else {
+                    /* Load into the primary */
+                    LoadExpr (CF_NONE, &Expr2);
+                    /* Generate code for the sub (the & is a hack here) */
+                    g_sub (flags & ~CF_CONST, 0);
+                }
+                /* Result is an rvalue in the primary register */
+                ED_FinalizeRValLoad (Expr);
+            }
+
         } else {
 
-            /* Left hand side is not constant, right hand side is.
-            ** Remove pushed value from stack.
-            */
-            RemoveCode (&Mark2);
-
+            /* Left hand side is not constant, right hand side is */
             if (IsClassPtr (lhst) && IsClassInt (rhst)) {
                 /* Left is pointer, right is int, must scale rhs */
                 Expr2.IVal *= CheckedPSizeOf (lhst);
                 /* Operate on pointers, result type is a pointer */
                 flags = CF_PTR;
-            } else if (IsClassPtr (lhst) && IsClassPtr (rhst)) {
-                /* Left is pointer, right is pointer, must scale result */
-                if (TypeCmp (Indirect (lhst), Indirect (rhst)) < TC_QUAL_DIFF) {
-                    Error ("Incompatible pointer types");
-                } else {
-                    rscale = CheckedPSizeOf (lhst);
-                }
-                /* Operate on pointers, result type is an integer */
-                flags = CF_PTR;
-                Expr->Type = type_int;
             } else if (IsClassInt (lhst) && IsClassInt (rhst)) {
                 /* Integer subtraction */
                 flags = typeadjust (Expr, &Expr2, 1);
@@ -3392,12 +3411,16 @@ static void parsesub (ExprDesc* Expr)
                 flags = CF_INT;
             }
 
-            /* Do the subtraction */
-            g_dec (flags | CF_CONST, Expr2.IVal);
-
-            /* If this was a pointer subtraction, we must scale the result */
-            if (rscale != 1) {
-                g_scale (flags, -rscale);
+            if (ED_IsConstAbs (&Expr2)) {
+                /* Remove pushed value from stack */
+                RemoveCode (&Mark2);
+                /* Do the subtraction */
+                g_dec (flags | CF_CONST, Expr2.IVal);
+            } else {
+                /* Rhs is not numeric, load into the primary */
+                LoadExpr (CF_NONE, &Expr2);
+                /* Generate code for the sub (the & is a hack here) */
+                g_sub (flags & ~CF_CONST, 0);
             }
 
             /* Result is an rvalue in the primary register */
@@ -3406,11 +3429,8 @@ static void parsesub (ExprDesc* Expr)
 
     } else {
 
-        /* Not constant, load into the primary */
+        /* Right hand side is not constant, load into the primary */
         LoadExpr (CF_NONE, &Expr2);
-
-        /* Right hand side is not constant. Get the rhs type. */
-        rhst = Expr2.Type;
 
         /* Check for pointer arithmetic */
         if (IsClassPtr (lhst) && IsClassInt (rhst)) {
@@ -3418,43 +3438,23 @@ static void parsesub (ExprDesc* Expr)
             g_scale (CF_INT, CheckedPSizeOf (lhst));
             /* Operate on pointers, result type is a pointer */
             flags = CF_PTR;
-        } else if (IsClassPtr (lhst) && IsClassPtr (rhst)) {
-            /* Left is pointer, right is pointer, must scale result */
-            if (TypeCmp (Indirect (lhst), Indirect (rhst)) < TC_QUAL_DIFF) {
-                Error ("Incompatible pointer types");
-            } else {
-                rscale = CheckedPSizeOf (lhst);
-            }
-            /* Operate on pointers, result type is an integer */
-            flags = CF_PTR;
-            Expr->Type = type_int;
         } else if (IsClassInt (lhst) && IsClassInt (rhst)) {
-            /* Integer subtraction. If the left hand side descriptor says that
-            ** the lhs is const, we have to remove this mark, since this is no
-            ** longer true, lhs is on stack instead.
-            */
-            if (ED_IsLocNone (Expr)) {
-                ED_FinalizeRValLoad (Expr);
-            }
             /* Adjust operand types */
             flags = typeadjust (Expr, &Expr2, 0);
         } else {
             /* OOPS */
             Error ("Invalid operands for binary operator '-'");
-            flags = CF_INT;
         }
 
         /* Generate code for the sub (the & is a hack here) */
         g_sub (flags & ~CF_CONST, 0);
 
-        /* If this was a pointer subtraction, we must scale the result */
-        if (rscale != 1) {
-            g_scale (flags, -rscale);
-        }
-
         /* Result is an rvalue in the primary register */
         ED_FinalizeRValLoad (Expr);
     }
+
+    /* Result type is either a pointer or an integer */
+    Expr->Type = PtrConversion (Expr->Type);
 
     /* Condition code not set */
     ED_MarkAsUntested (Expr);
@@ -3468,7 +3468,7 @@ void hie8 (ExprDesc* Expr)
     ExprWithCheck (hie9, Expr);
     while (CurTok.Tok == TOK_PLUS || CurTok.Tok == TOK_MINUS) {
         if (CurTok.Tok == TOK_PLUS) {
-            parseadd (Expr);
+            parseadd (Expr, 0);
         } else {
             parsesub (Expr);
         }
