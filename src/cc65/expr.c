@@ -651,11 +651,11 @@ void DoDeferred (unsigned Flags, ExprDesc* Expr)
 }
 
 
-static unsigned FunctionParamList (FuncDesc* Func, int IsFastcall, ExprDesc* ED)
-/* Parse a function parameter list, and pass the arguments to the called
-** function. Depending on several criteria, this may be done by just pushing
-** into each parameter separately, or creating the parameter frame once, and
-** then storing into this frame.
+static unsigned FunctionArgList (FuncDesc* Func, int IsFastcall, ExprDesc* ED)
+/* Parse the argument list of the called function and pass the arguments to it.
+** Depending on several criteria, this may be done by just pushing into each
+** parameter separately, or creating the parameter frame once and then storing
+** arguments into this frame one by one.
 ** The function returns the size of the arguments pushed in bytes.
 */
 {
@@ -860,7 +860,7 @@ static void FunctionCall (ExprDesc* Expr)
 {
     FuncDesc*     Func;           /* Function descriptor */
     int           IsFuncPtr;      /* Flag */
-    unsigned      ParamSize;      /* Number of parameter bytes */
+    unsigned      ArgSize;        /* Number of arguments bytes */
     CodeMark      Mark;
     int           PtrOffs = 0;    /* Offset of function pointer on stack */
     int           IsFastcall = 0; /* True if we are fast-calling the function */
@@ -932,8 +932,8 @@ static void FunctionCall (ExprDesc* Expr)
                      IsFastcallFunc (Expr->Type);
     }
 
-    /* Parse the parameter list */
-    ParamSize = FunctionParamList (Func, IsFastcall, Expr);
+    /* Parse the argument list and pass them to the called function */
+    ArgSize = FunctionArgList (Func, IsFastcall, Expr);
 
     /* We need the closing paren here */
     ConsumeRParen ();
@@ -952,11 +952,11 @@ static void FunctionCall (ExprDesc* Expr)
 
             /* Not a fastcall function - we may use the primary */
             if (PtrOnStack) {
-                /* If we have no parameters, the pointer is still in the
+                /* If we have no arguments, the pointer is still in the
                 ** primary. Remove the code to push it and correct the
                 ** stack pointer.
                 */
-                if (ParamSize == 0) {
+                if (ArgSize == 0) {
                     RemoveCode (&Mark);
                     PtrOnStack = 0;
                 } else {
@@ -969,7 +969,7 @@ static void FunctionCall (ExprDesc* Expr)
             }
 
             /* Call the function */
-            g_callind (FuncTypeOf (Expr->Type+1), ParamSize, PtrOffs);
+            g_callind (FuncTypeOf (Expr->Type+1), ArgSize, PtrOffs);
 
         } else {
 
@@ -978,7 +978,7 @@ static void FunctionCall (ExprDesc* Expr)
             ** Since fastcall functions may never be variadic, we can use the
             ** index register for this purpose.
             */
-            g_callind (CF_STACK, ParamSize, PtrOffs);
+            g_callind (CF_STACK, ArgSize, PtrOffs);
         }
 
         /* If we have a pointer on stack, remove it */
@@ -1030,9 +1030,9 @@ static void FunctionCall (ExprDesc* Expr)
 
             SB_Done (&S);
 
-            g_call (FuncTypeOf (Expr->Type), Func->WrappedCall->Name, ParamSize);
+            g_call (FuncTypeOf (Expr->Type), Func->WrappedCall->Name, ArgSize);
         } else {
-            g_call (FuncTypeOf (Expr->Type), (const char*) Expr->Name, ParamSize);
+            g_call (FuncTypeOf (Expr->Type), (const char*) Expr->Name, ArgSize);
         }
 
     }
@@ -1340,7 +1340,6 @@ static void Primary (ExprDesc* E)
 static void StructRef (ExprDesc* Expr)
 /* Process struct/union field after . or ->. */
 {
-    ident Ident;
     Type* FinalType;
     TypeCode Q;
 
@@ -1354,40 +1353,40 @@ static void StructRef (ExprDesc* Expr)
     }
 
     /* Get the symbol table entry and check for a struct/union field */
-    strcpy (Ident, CurTok.Ident);
     NextToken ();
-    const SymEntry Field = FindStructField (Expr->Type, Ident);
+    const SymEntry Field = FindStructField (Expr->Type, CurTok.Ident);
     if (Field.Type == 0) {
-        Error ("No field named '%s' found in '%s'", Ident, GetFullTypeName (Expr->Type));
+        Error ("No field named '%s' found in '%s'", CurTok.Ident, GetFullTypeName (Expr->Type));
         /* Make the expression an integer at address zero */
         ED_MakeConstAbs (Expr, 0, type_int);
         return;
     }
 
-    /* A struct/union is usually an lvalue. If not, it is a struct/union passed
-    ** in the primary register, which is usually the result returned from a
-    ** function. However, it is possible that this rvalue is the result of
-    ** certain kind of operations on an lvalue such as assignment, and there
-    ** are no reasons to disallow such use cases. So we just rely on the check
-    ** upon function returns to catch the unsupported cases and dereference the
-    ** rvalue address of the struct/union here all the time.
-    */
-    if (IsTypePtr (Expr->Type)      ||
-        (ED_IsRVal (Expr)       &&
-         ED_IsLocPrimary (Expr) &&
-         Expr->Type == GetStructReplacementType (Expr->Type))) {
+    if (IsTypePtr (Expr->Type)) {
 
-        if (!ED_IsConst (Expr) && !ED_IsLocPrimary (Expr)) {
+        /* pointer->field */
+        if (!ED_IsQuasiConst (Expr) && !ED_IsLocPrimary (Expr)) {
             /* If we have a non-const struct/union pointer that is not in the
-            ** primary yet, load its content now.
+            ** primary yet, load its content now to get the base address.
             */
             LoadExpr (CF_NONE, Expr);
-
-            /* Clear the offset */
-            Expr->IVal = 0;
+            ED_FinalizeRValLoad (Expr);
         }
-
         /* Dereference the address expression */
+        ED_IndExpr (Expr);
+
+    } else if (ED_IsRVal (Expr)       &&
+               ED_IsLocPrimary (Expr) &&
+               Expr->Type == GetStructReplacementType (Expr->Type)) {
+
+        /* A struct/union is usually an lvalue. If not, it is a struct/union
+        ** passed in the primary register, which is usually the result returned
+        ** from a function. However, it is possible that this rvalue is the
+        ** result of certain kind of operations on an lvalue such as assignment,
+        ** and there are no reasons to disallow such use cases. So we just rely
+        ** on the check upon function returns to catch the unsupported cases and
+        ** dereference the rvalue address of the struct/union here all the time.
+        */
         ED_IndExpr (Expr);
 
     } else if (!ED_IsLocQuasiConst (Expr) && !ED_IsLocPrimaryOrExpr (Expr)) {
@@ -2850,27 +2849,31 @@ static void parseadd (ExprDesc* Expr, int DoArrayRef)
             } else {
                 /* OOPS */
                 AddDone = -1;
+                /* Avoid further errors */
+                ED_MakeConstAbsInt (Expr, 0);
             }
 
-            /* Do constant calculation if we can */
-            if (ED_IsAbs (&Expr2) &&
-                (ED_IsAbs (Expr) || lscale == 1)) {
-                if (IsClassInt (lhst) && IsClassInt (rhst)) {
-                    Expr->Type = ArithmeticConvert (Expr->Type, Expr2.Type);
+            if (!AddDone) {
+                /* Do constant calculation if we can */
+                if (ED_IsAbs (&Expr2) &&
+                    (ED_IsAbs (Expr) || lscale == 1)) {
+                    if (IsClassInt (lhst) && IsClassInt (rhst)) {
+                        Expr->Type = ArithmeticConvert (Expr->Type, Expr2.Type);
+                    }
+                    Expr->IVal = Expr->IVal * lscale + Expr2.IVal * rscale;
+                    AddDone = 1;
+                } else if (ED_IsAbs (Expr) &&
+                    (ED_IsAbs (&Expr2) || rscale == 1)) {
+                    if (IsClassInt (lhst) && IsClassInt (rhst)) {
+                        Expr2.Type = ArithmeticConvert (Expr2.Type, Expr->Type);
+                    }
+                    Expr2.IVal = Expr->IVal * lscale + Expr2.IVal * rscale;
+                    /* Adjust the flags */
+                    Expr2.Flags |= Expr->Flags & ~E_MASK_KEEP_SUBEXPR;
+                    /* Get the symbol and the name */
+                    *Expr = Expr2;
+                    AddDone = 1;
                 }
-                Expr->IVal = Expr->IVal * lscale + Expr2.IVal * rscale;
-                AddDone = 1;
-            } else if (ED_IsAbs (Expr) &&
-                (ED_IsAbs (&Expr2) || rscale == 1)) {
-                if (IsClassInt (lhst) && IsClassInt (rhst)) {
-                    Expr2.Type = ArithmeticConvert (Expr2.Type, Expr->Type);
-                }
-                Expr2.IVal = Expr->IVal * lscale + Expr2.IVal * rscale;
-                /* Adjust the flags */
-                Expr2.Flags |= Expr->Flags & ~E_MASK_KEEP_SUBEXPR;
-                /* Get the symbol and the name */
-                *Expr = Expr2;
-                AddDone = 1;
             }
 
             if (AddDone) {
