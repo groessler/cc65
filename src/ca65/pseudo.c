@@ -566,8 +566,8 @@ static void DoBss (void)
 
 
 
-static void DoByte (void)
-/* Define bytes */
+static void DoByteBase (int EnableTranslation)
+/* Define bytes or literals */
 {
     /* Element type for the generated array */
     static const char EType[1] = { GT_BYTE };
@@ -579,8 +579,12 @@ static void DoByte (void)
     /* Parse arguments */
     while (1) {
         if (CurTok.Tok == TOK_STRCON) {
-            /* A string, translate into target charset and emit */
-            TgtTranslateStrBuf (&CurTok.SVal);
+            /* A string, translate into target charset
+               if appropriate */
+            if (EnableTranslation) {
+                TgtTranslateStrBuf (&CurTok.SVal);
+            }
+            /* Emit */
             EmitStrBuf (&CurTok.SVal);
             NextTok ();
         } else {
@@ -609,6 +613,14 @@ static void DoByte (void)
 
     /* Free the type string */
     SB_Done (&Type);
+}
+
+
+
+static void DoByte (void)
+/* Define bytes with translation */
+{
+    DoByteBase (1);
 }
 
 
@@ -1415,6 +1427,14 @@ static void DoList (void)
 
 
 
+static void DoLiteral (void)
+/* Define bytes without translation */
+{
+    DoByteBase (0);
+}
+
+
+
 static void DoLoBytes (void)
 /* Define bytes, extracting the lo byte from each expression in the list */
 {
@@ -1568,6 +1588,19 @@ static void DoPageLength (void)
 
 
 
+static void DoPopCharmap (void)
+/* Restore a charmap */
+{
+    if (TgtTranslateStackIsEmpty ()) {
+        ErrorSkip ("Charmap stack is empty");
+        return;
+    }
+
+    TgtTranslatePop ();
+}
+
+
+
 static void DoPopCPU (void)
 /* Pop an old CPU setting from the CPU stack */
 {
@@ -1653,6 +1686,16 @@ static void DoPSC02 (void)
 /* Switch to 65SC02 CPU */
 {
     SetCPU (CPU_65SC02);
+}
+
+
+
+static void DoPushCharmap (void)
+/* Save the current charmap */
+{
+    if (!TgtTranslatePush ()) {
+        ErrorSkip ("Charmap stack overflow");
+    }
 }
 
 
@@ -2080,6 +2123,7 @@ static CtrlDesc CtrlCmdTab [] = {
     { ccNone,           DoLineCont      },
     { ccNone,           DoList          },
     { ccNone,           DoListBytes     },
+    { ccNone,           DoLiteral       },
     { ccNone,           DoUnexpected    },      /* .LOBYTE */
     { ccNone,           DoLoBytes       },
     { ccNone,           DoUnexpected    },      /* .LOCAL */
@@ -2101,10 +2145,12 @@ static CtrlDesc CtrlCmdTab [] = {
     { ccNone,           DoUnexpected    },      /* .PARAMCOUNT */
     { ccNone,           DoPC02          },
     { ccNone,           DoPDTV          },
+    { ccNone,           DoPopCharmap    },
     { ccNone,           DoPopCPU        },
     { ccNone,           DoPopSeg        },
     { ccNone,           DoProc          },
     { ccNone,           DoPSC02         },
+    { ccNone,           DoPushCharmap   },
     { ccNone,           DoPushCPU       },
     { ccNone,           DoPushSeg       },
     { ccNone,           DoUnexpected    },      /* .REFERENCED */
@@ -2182,5 +2228,8 @@ void CheckPseudo (void)
     }
     if (!IS_IsEmpty (&CPUStack)) {
         Warning (1, "CPU stack is not empty");
+    }
+    if (!TgtTranslateStackIsEmpty ()) {
+        Warning (1, "Charmap stack is not empty");
     }
 }
