@@ -80,12 +80,15 @@ static GenDesc GenOASGN  = { TOK_OR_ASSIGN,     GEN_NOPUSH,     g_or  };
 
 
 static void parseadd (ExprDesc* Expr, int DoArrayRef);
+static void PostInc (ExprDesc* Expr);
+static void PostDec (ExprDesc* Expr);
 
 
 
 /*****************************************************************************/
 /*                             Helper functions                              */
 /*****************************************************************************/
+
 
 
 static unsigned GlobalModeFlags (const ExprDesc* Expr)
@@ -1301,6 +1304,7 @@ static void Primary (ExprDesc* E)
                 /* Statement block */
                 NextToken ();
                 Error ("Expression expected");
+                E->Flags |= E_EVAL_MAYBE_UNUSED;
                 hie0 (E);
                 if (CurTok.Tok == TOK_RCURLY) {
                     NextToken ();
@@ -1332,6 +1336,7 @@ static void Primary (ExprDesc* E)
                     }
                 } else {
                     Error ("Expression expected");
+                    E->Flags |= E_EVAL_MAYBE_UNUSED;
                     NextToken ();
                 }
             }
@@ -1508,7 +1513,8 @@ static void hie11 (ExprDesc *Expr)
     Primary (Expr);
 
     /* Check for a rhs */
-    while (CurTok.Tok == TOK_LBRACK || CurTok.Tok == TOK_LPAREN ||
+    while (CurTok.Tok == TOK_INC    || CurTok.Tok == TOK_DEC    ||
+           CurTok.Tok == TOK_LBRACK || CurTok.Tok == TOK_LPAREN ||
            CurTok.Tok == TOK_DOT    || CurTok.Tok == TOK_PTR_REF) {
 
         switch (CurTok.Tok) {
@@ -1550,6 +1556,14 @@ static void hie11 (ExprDesc *Expr)
                     Error ("Struct pointer or union pointer expected");
                 }
                 StructRef (Expr);
+                break;
+
+            case TOK_INC:
+                PostInc (Expr);
+                break;
+
+            case TOK_DEC:
+                PostDec (Expr);
                 break;
 
             default:
@@ -2103,13 +2117,6 @@ void hie10 (ExprDesc* Expr)
 
                 /* An expression */
                 hie11 (Expr);
-
-                /* Handle post increment */
-                switch (CurTok.Tok) {
-                    case TOK_INC:   PostInc (Expr); break;
-                    case TOK_DEC:   PostDec (Expr); break;
-                    default:                        break;
-                }
 
             }
             break;
