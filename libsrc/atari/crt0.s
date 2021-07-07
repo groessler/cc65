@@ -10,13 +10,13 @@
 
         .export         __STARTUP__ : absolute = 1      ; Mark as startup
         .export         _exit, start, excexit, SP_save
-        .export         __LMARGN_save                   ; original LMARGN setting
 
         .import         initlib, donelib
         .import         callmain, zerobss
         .import         __RESERVED_MEMORY__
         .import         __MAIN_START__, __MAIN_SIZE__
         .import         __LOWCODE_RUN__, __LOWCODE_SIZE__
+        .forceimport    lmarginprep                     ; set the left margin to 0
 .ifdef __ATARIXL__
         .import         __STACKSIZE__
         .import         sram_init
@@ -83,17 +83,11 @@ start:
 
 .endif
 
-; Set the left margin to 0.
-
-        lda     LMARGN
-        sta     __LMARGN_save
-        ldy     #0
-        sty     LMARGN
-
 ; Set the keyboard to upper-/lower-case mode.
 
         ldx     SHFLOK
         stx     SHFLOK_save
+	ldy     #0
         sty     SHFLOK
 
 ; Initialize the conio stuff.
@@ -117,11 +111,6 @@ _exit:  ldx     SP_save
 ; Restore the system stuff.
 
 excexit:jsr     donelib         ; Run module destructors; 'excexit' is called from the exec routine
-
-; Restore the left margin.
-
-        lda     __LMARGN_save
-        sta     LMARGN
 
 ; Restore the kb mode.
 
@@ -197,7 +186,6 @@ excexit:jsr     donelib         ; Run module destructors; 'excexit' is called fr
 
 SP_save:        .res    1
 SHFLOK_save:    .res    1
-__LMARGN_save:  .res    1
 .ifndef __ATARIXL__
 APPMHI_save:    .res    2
 .endif

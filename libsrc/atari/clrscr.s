@@ -31,6 +31,7 @@ _clr1:  sta     (ptr1),y
         dey
         jmp     _clr1
 
-done:   sta     COLCRS
-        sta     ROWCRS
+done:   sta     ROWCRS
+        lda     LMARGN
+        sta     COLCRS
         jmp     setcursor
