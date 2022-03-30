@@ -129,7 +129,7 @@ LDFLAGS_tgidemo_atarixl    = --start-addr 0x4000
 # --------------------------------------------------------------------------
 # Generic rules
 
-.PHONY: all mostlyclean clean install zip samples disk
+.PHONY: samples all mostlyclean clean install zip disk platforms
 
 %: %.c
 %: %.s
@@ -154,7 +154,7 @@ endif
 # Lists of subdirectories
 
 # disasm depends on cpp
-DIRLIST = tutorial geos atari2600 atari5200 apple2 gamate supervision sym1 cbm
+DIRLIST = tutorial geos atari2600 atari5200 apple2 gamate lynx supervision sym1 cbm
 
 # --------------------------------------------------------------------------
 # Lists of executables
@@ -199,7 +199,8 @@ EXELIST_atmos =    \
         ascii      \
         hello      \
         mandelbrot \
-        sieve
+        sieve      \
+        tgidemo
 
 EXELIST_bbc = \
         notavailable
@@ -311,7 +312,7 @@ EXELIST_sim65c02 = $(EXELIST_sim6502)
 
 EXELIST_supervision = \
         notavailable
-        
+
 EXELIST_sym1 =     \
         notavailable
 
@@ -321,7 +322,7 @@ EXELIST_telestrat = \
         hello       \
         mandelbrot  \
         sieve       \
-#        tgidemo
+        tgidemo
 
 EXELIST_vic20 =    \
         ascii      \
@@ -340,7 +341,7 @@ endif
 
 define SUBDIR_recipe
 
-@$(MAKE) -C $(dir) --no-print-directory $@
+@+$(MAKE) -C $(dir) --no-print-directory $@
 
 endef # SUBDIR_recipe
 
@@ -359,6 +360,52 @@ endif
 disk: $(DISK_$(SYS))
 
 all:
+
+# --------------------------------------------------------------------------
+# List of every supported platform
+TARGETS :=     \
+  apple2       \
+  apple2enh    \
+  atari        \
+  atarixl      \
+  atari2600    \
+  atari5200    \
+  atmos        \
+  bbc          \
+  c128         \
+  c16          \
+  c64          \
+  cbm510       \
+  cbm610       \
+  creativision \
+  cx16         \
+  gamate       \
+  lunix        \
+  lynx         \
+  nes          \
+  osic1p       \
+  pce          \
+  pet          \
+  plus4        \
+  sim6502      \
+  sim65c02     \
+  supervision  \
+  sym1         \
+  telestrat    \
+  vic20
+
+# --------------------------------------------------------------------------
+# Rule to make the binaries for every platform
+
+define TARGET_recipe
+
+@$(MAKE) -j2 SYS:=$(T)
+@$(MAKE) --no-print-directory clean SYS:=$(T)
+
+endef # TARGET_recipe
+
+platforms:
+	$(foreach T,$(TARGETS),$(TARGET_recipe))
 
 # --------------------------------------------------------------------------
 # Overlay rules. Overlays need special ld65 configuration files.  Also, the
