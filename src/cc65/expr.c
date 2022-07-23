@@ -48,13 +48,6 @@
 
 
 
-/* Map a generator function and its attributes to a token */
-typedef struct GenDesc {
-    token_t       Tok;                  /* Token to map to */
-    unsigned      Flags;                /* Flags for generator function */
-    void          (*Func) (unsigned, unsigned long);    /* Generator func */
-} GenDesc;
-
 /* Descriptors for the operations */
 static GenDesc GenPASGN  = { TOK_PLUS_ASSIGN,   GEN_NOPUSH,     g_add };
 static GenDesc GenSASGN  = { TOK_MINUS_ASSIGN,  GEN_NOPUSH,     g_sub };
@@ -243,7 +236,7 @@ static const GenDesc* FindGen (token_t Tok, const GenDesc* Table)
 /* Find a token in a generator table */
 {
     while (Table->Tok != TOK_INVALID) {
-        if (Table->Tok == Tok) {
+        if ((token_t)Table->Tok == Tok) {
             return Table;
         }
         ++Table;
@@ -649,6 +642,9 @@ void DoDeferred (unsigned Flags, ExprDesc* Expr)
         /* Sufficient to pop the processor flags */
         AddCodeLine ("plp");
     }
+
+    /* Expression has had side effects */
+    Expr->Flags |= E_SIDE_EFFECTS;
 }
 
 
@@ -772,9 +768,10 @@ static unsigned FunctionArgList (FuncDesc* Func, int IsFastcall, ExprDesc* ED)
             } else {
 
                 /* No prototype available. Convert array to "pointer to first
-                ** element", and function to "pointer to function".
+                ** element", function to "pointer to function" and do integral
+                ** promotion if necessary.
                 */
-                Expr.Type = PtrConversion (Expr.Type);
+                TypeConversion (&Expr, StdConversion (Expr.Type));
 
             }
 
@@ -821,6 +818,9 @@ static unsigned FunctionArgList (FuncDesc* Func, int IsFastcall, ExprDesc* ED)
                 PushedSize += ArgSize;
             }
         }
+
+        /* Propagate viral flags */
+        ED_PropagateFrom (ED, &Expr);
 
         /* Check for end of argument list */
         if (CurTok.Tok != TOK_COMMA) {
@@ -1064,6 +1064,9 @@ static void FunctionCall (ExprDesc* Expr)
     }
 
     Expr->Type = ReturnType;
+
+    /* We assume all function calls had side effects */
+    Expr->Flags |= E_SIDE_EFFECTS;
 }
 
 
@@ -1133,7 +1136,7 @@ static void Primary (ExprDesc* E)
                 /* output its label */
                 E->Flags = E_RTYPE_RVAL | E_LOC_CODE | E_ADDRESS_OF;
                 E->Name = Entry->V.L.Label;
-                E->Type = NewPointerTo (type_void);
+                E->Type = type_void_p;
                 NextToken ();
             } else {
                 Error ("Computed gotos are a C extension, not supported with this --standard");
@@ -1273,7 +1276,7 @@ static void Primary (ExprDesc* E)
         case TOK_ASM:
             /* ASM statement */
             AsmStatement ();
-            E->Flags = E_RTYPE_RVAL | E_EVAL_MAYBE_UNUSED;
+            E->Flags = E_RTYPE_RVAL | E_EVAL_MAYBE_UNUSED | E_SIDE_EFFECTS;
             E->Type  = type_void;
             break;
 
@@ -1658,6 +1661,9 @@ static void PreInc (ExprDesc* Expr)
 
     /* Result is an expression, no reference */
     ED_FinalizeRValLoad (Expr);
+
+    /* Expression has had side effects */
+    Expr->Flags |= E_SIDE_EFFECTS;
 }
 
 
@@ -1685,6 +1691,9 @@ static void PreDec (ExprDesc* Expr)
 
     /* Result is an expression, no reference */
     ED_FinalizeRValLoad (Expr);
+
+    /* Expression has had side effects */
+    Expr->Flags |= E_SIDE_EFFECTS;
 }
 
 
@@ -1721,12 +1730,18 @@ static void PostInc (ExprDesc* Expr)
         LoadExpr (CF_NONE, Expr);
         AddCodeLine ("inc %s", ED_GetLabelName (Expr, 0));
 
+        /* Expression has had side effects */
+        Expr->Flags |= E_SIDE_EFFECTS;
+
     } else {
 
         if (ED_IsLocPrimaryOrExpr (Expr)) {
 
             /* Do the increment */
             DoInc (Expr, OA_NEED_OLD);
+
+            /* Expression has had side effects */
+            Expr->Flags |= E_SIDE_EFFECTS;
 
         } else {
 
@@ -1771,12 +1786,18 @@ static void PostDec (ExprDesc* Expr)
         LoadExpr (CF_NONE, Expr);
         AddCodeLine ("dec %s", ED_GetLabelName (Expr, 0));
 
+        /* Expression has had side effects */
+        Expr->Flags |= E_SIDE_EFFECTS;
+
     } else {
 
         if (ED_IsLocPrimaryOrExpr (Expr)) {
 
             /* Do the decrement */
             DoDec (Expr, OA_NEED_OLD);
+
+            /* Expression has had side effects */
+            Expr->Flags |= E_SIDE_EFFECTS;
 
         } else {
 
@@ -1952,7 +1973,7 @@ void hie10 (ExprDesc* Expr)
                 /* The & operator yields an rvalue address */
                 ED_AddrExpr (Expr);
             }
-            Expr->Type = NewPointerTo (Expr->Type);
+            Expr->Type = AddressOf (Expr->Type);
             break;
 
         case TOK_SIZEOF:
@@ -2238,6 +2259,9 @@ static void hie_internal (const GenDesc* Ops,   /* List of generators */
             /* We have an rvalue in the primary now */
             ED_FinalizeRValLoad (Expr);
         }
+
+        /* Propagate viral flags */
+        ED_PropagateFrom (Expr, &Expr2);
     }
 }
 
@@ -2271,9 +2295,9 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
         Tok = CurTok.Tok;
         NextToken ();
 
-        /* If lhs is a function, convert it to pointer to function */
+        /* If lhs is a function, convert it to the address of the function */
         if (IsTypeFunc (Expr->Type)) {
-            Expr->Type = NewPointerTo (Expr->Type);
+            Expr->Type = AddressOf (Expr->Type);
         }
 
         /* Get the lhs on stack */
@@ -2293,9 +2317,9 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
         /* Get the right hand side */
         MarkedExprWithCheck (hienext, &Expr2);
 
-        /* If rhs is a function, convert it to pointer to function */
+        /* If rhs is a function, convert it to the address of the function */
         if (IsTypeFunc (Expr2.Type)) {
-            Expr2.Type = NewPointerTo (Expr2.Type);
+            Expr2.Type = AddressOf (Expr2.Type);
         }
 
         /* Check for a numeric constant expression */
@@ -2659,6 +2683,9 @@ static void hie_compare (const GenDesc* Ops,    /* List of generators */
 
         /* Result type is always boolean */
 Done:   Expr->Type = type_bool;
+
+        /* Propagate viral flags */
+        ED_PropagateFrom (Expr, &Expr2);
     }
 }
 
@@ -3069,12 +3096,15 @@ static void parseadd (ExprDesc* Expr, int DoArrayRef)
             Error ("Invalid operands for binary operator '+'");
         } else {
             /* Array and function types must be converted to pointer types */
-            Expr->Type = PtrConversion (Expr->Type);
+            Expr->Type = StdConversion (Expr->Type);
         }
     }
 
     /* Condition code not set */
     ED_MarkAsUntested (Expr);
+
+    /* Propagate viral flags */
+    ED_PropagateFrom (Expr, &Expr2);
 }
 
 
@@ -3348,10 +3378,13 @@ static void parsesub (ExprDesc* Expr)
     }
 
     /* Result type is either a pointer or an integer */
-    Expr->Type = PtrConversion (Expr->Type);
+    Expr->Type = StdConversion (Expr->Type);
 
     /* Condition code not set */
     ED_MarkAsUntested (Expr);
+
+    /* Propagate viral flags */
+    ED_PropagateFrom (Expr, &Expr2);
 }
 
 
@@ -3603,6 +3636,12 @@ static int hieAnd (ExprDesc* Expr, unsigned* TrueLab, int* TrueLabAllocated)
                     }
                 }
             }
+
+            /* Propagate viral flags */
+            if ((Expr->Flags & E_EVAL_UNEVAL) != E_EVAL_UNEVAL) {
+                ED_PropagateFrom (Expr, &Expr2);
+            }
+
         }
 
         /* Last expression */
@@ -3766,6 +3805,11 @@ static void hieOr (ExprDesc *Expr)
                         ED_MakeConstBool (Expr, 1);
                     }
                 }
+            }
+
+            /* Propagate viral flags */
+            if ((Expr->Flags & E_EVAL_UNEVAL) != E_EVAL_UNEVAL) {
+                ED_PropagateFrom (Expr, &Expr2);
             }
 
         }
@@ -4059,6 +4103,14 @@ static void hieQuest (ExprDesc* Expr)
 
         /* Setup the target expression */
         Expr->Type = ResultType;
+
+        /* Propagate viral flags */
+        if ((Expr2.Flags & E_EVAL_UNEVAL) != E_EVAL_UNEVAL) {
+            ED_PropagateFrom (Expr, &Expr2);
+        }
+        if ((Expr3.Flags & E_EVAL_UNEVAL) != E_EVAL_UNEVAL) {
+            ED_PropagateFrom (Expr, &Expr3);
+        }
     }
 }
 
@@ -4136,26 +4188,39 @@ void hie0 (ExprDesc *Expr)
         /* Append deferred inc/dec at sequence point */
         DoDeferred (SQP_KEEP_NONE, Expr);
 
-        /* If the expression didn't generate code or isn't cast to type void,
-        ** emit a warning.
+        /* If the expression has no observable effect and isn't cast to type
+        ** void, emit a warning and remove useless code if any.
         */
         GetCodePos (&End);
-        if (!ED_MayHaveNoEffect (Expr)      &&
-            CodeRangeIsEmpty (&Start, &End) &&
-            IS_Get (&WarnNoEffect)          &&
-            PrevErrorCount == ErrorCount) {
-            Warning ("Expression result unused");
+        if (CodeRangeIsEmpty (&Start, &End) ||
+            (Expr->Flags & E_SIDE_EFFECTS) == 0) {
+
+            if (!ED_MayHaveNoEffect (Expr)  &&
+                IS_Get (&WarnNoEffect)      &&
+                PrevErrorCount == ErrorCount) {
+                Warning ("Left-hand operand of comma expression has no effect");
+            }
+
+            /* Remove code with no effect */
+            RemoveCode (&Start);
         }
 
         PrevErrorCount = ErrorCount;
+
         /* Remember the current code position */
         GetCodePos (&Start);
 
+        /* Keep viral flags propagated from subexpressions */
+        Flags |= Expr->Flags & E_MASK_VIRAL;
+
         /* Reset the expression */
         ED_Init (Expr);
-        Expr->Flags = Flags;
+        Expr->Flags = Flags & ~E_MASK_VIRAL;
         NextToken ();
         hie1 (Expr);
+
+        /* Propagate viral flags */
+        Expr->Flags |= Flags & E_MASK_VIRAL;
     }
 }
 
@@ -4217,7 +4282,8 @@ ExprDesc NoCodeConstExpr (void (*Func) (ExprDesc*))
     if (!ED_IsConst (&Expr) || !ED_CodeRangeIsEmpty (&Expr)) {
         Error ("Constant expression expected");
         /* To avoid any compiler errors, make the expression a valid const */
-        ED_MakeConstAbsInt (&Expr, 1);
+        Expr.Flags &= E_MASK_RTYPE | E_MASK_KEEP_RESULT;
+        Expr.Flags |= E_LOC_NONE;
     }
 
     /* Return by value */
