@@ -145,6 +145,7 @@ extern unsigned char c64_ram_emd[];
 extern unsigned char c64_ramcart_emd[];
 extern unsigned char c64_reu_emd[];
 extern unsigned char c64_vdc_emd[];
+extern unsigned char c64_rrr_emd[];
 extern unsigned char dtv_himem_emd[];
 extern unsigned char c64_hitjoy_joy[];
 extern unsigned char c64_numpad_joy[];
