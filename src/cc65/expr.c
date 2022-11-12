@@ -103,6 +103,100 @@ unsigned GlobalModeFlags (const ExprDesc* Expr)
 
 
 
+static unsigned TypeOfBySize (unsigned Size)
+/* Get the code generator replacement type of the object by its size */
+{
+    unsigned NewType;
+    /* If the size is less than or equal to that of a a long, we will copy
+    ** the struct using the primary register, otherwise we use memcpy.
+    */
+    switch (Size) {
+        case 1:     NewType = CF_CHAR;  break;
+        case 2:     NewType = CF_INT;   break;
+        case 3:     /* FALLTHROUGH */
+        case 4:     NewType = CF_LONG;  break;
+        default:    NewType = CF_NONE;  break;
+    }
+
+    return NewType;
+}
+
+
+
+unsigned TypeOf (const Type* T)
+/* Get the code generator base type of the object */
+{
+    unsigned NewType;
+
+    switch (GetUnderlyingTypeCode (T)) {
+
+        case T_SCHAR:
+            return CF_CHAR;
+
+        case T_UCHAR:
+            return CF_CHAR | CF_UNSIGNED;
+
+        case T_SHORT:
+        case T_INT:
+            return CF_INT;
+
+        case T_USHORT:
+        case T_UINT:
+        case T_PTR:
+        case T_ARRAY:
+            return CF_INT | CF_UNSIGNED;
+
+        case T_LONG:
+            return CF_LONG;
+
+        case T_ULONG:
+            return CF_LONG | CF_UNSIGNED;
+
+        case T_FLOAT:
+        case T_DOUBLE:
+            /* These two are identical in the backend */
+            return CF_FLOAT;
+
+        case T_FUNC:
+            /* Treat this as a function pointer */
+            return CF_INT | CF_UNSIGNED;
+
+        case T_STRUCT:
+        case T_UNION:
+            NewType = TypeOfBySize (SizeOf (T));
+            if (NewType != CF_NONE) {
+                return NewType;
+            }
+            /* Address of ... */
+            return CF_INT | CF_UNSIGNED;
+
+        case T_VOID:
+        case T_ENUM:
+            /* Incomplete enum type */
+            Error ("Incomplete type '%s'", GetFullTypeName (T));
+            return CF_INT;
+
+        default:
+            Error ("Illegal type %04lX", T->C);
+            return CF_INT;
+    }
+}
+
+
+
+unsigned FuncTypeOf (const Type* T)
+/* Get the code generator flag for calling the function */
+{
+    if (GetUnderlyingTypeCode (T) == T_FUNC) {
+        return (T->A.F->Flags & FD_VARIADIC) ? 0 : CF_FIXARGC;
+    } else {
+        Error ("Illegal function type %04lX", T->C);
+        return 0;
+    }
+}
+
+
+
 void ExprWithCheck (void (*Func) (ExprDesc*), ExprDesc* Expr)
 /* Call an expression function with checks. */
 {
@@ -193,12 +287,15 @@ static unsigned typeadjust (ExprDesc* lhs, const ExprDesc* rhs, int NoPush)
 
 
 
-void LimitExprValue (ExprDesc* Expr)
+void LimitExprValue (ExprDesc* Expr, int WarnOverflow)
 /* Limit the constant value of the expression to the range of its type */
 {
     switch (GetUnderlyingTypeCode (Expr->Type)) {
         case T_INT:
         case T_SHORT:
+            if (WarnOverflow && ((Expr->IVal < -0x8000) || (Expr->IVal > 0x7FFF))) {
+                Warning ("Signed integer constant overflow");
+            }
             Expr->IVal = (int16_t)Expr->IVal;
             break;
 
@@ -218,6 +315,9 @@ void LimitExprValue (ExprDesc* Expr)
             break;
 
         case T_SCHAR:
+            if (WarnOverflow && ((Expr->IVal < -0x80) || (Expr->IVal > 0x7F))) {
+                Warning ("Signed character constant overflow");
+            }
             Expr->IVal = (int8_t)Expr->IVal;
             break;
 
@@ -274,11 +374,10 @@ static unsigned ExprCheckedSizeOf (const Type* T)
 /* Specially checked SizeOf() used in 'sizeof' expressions */
 {
     unsigned Size = SizeOf (T);
-    SymEntry* Sym;
 
     if (Size == 0) {
-        Sym = GetSymType (T);
-        if (Sym == 0 || !SymIsDef (Sym)) {
+        SymEntry* TagSym = GetESUTagSym (T);
+        if (TagSym == 0 || !SymIsDef (TagSym)) {
             Error ("Cannot apply 'sizeof' to incomplete type '%s'", GetFullTypeName (T));
         }
     }
@@ -1296,13 +1395,13 @@ static void Primary (ExprDesc* E)
                 /* Let's see if this is a C99-style declaration */
                 DeclSpec    Spec;
                 InitDeclSpec (&Spec);
-                ParseDeclSpec (&Spec, -1, T_QUAL_NONE);
+                ParseDeclSpec (&Spec, TS_DEFAULT_TYPE_INT, SC_AUTO);
 
                 if (Spec.Type->C != T_END) {
 
                     Error ("Mixed declarations and code are not supported in cc65");
                     while (CurTok.Tok != TOK_SEMI) {
-                        Declaration Decl;
+                        Declarator Decl;
 
                         /* Parse one declaration */
                         ParseDecl (&Spec, &Decl, DM_ACCEPT_IDENT);
@@ -1822,7 +1921,7 @@ static void UnaryOp (ExprDesc* Expr)
         Expr->Type = IntPromotion (Expr->Type);
 
         /* Limit the calculated value to the range of its type */
-        LimitExprValue (Expr);
+        LimitExprValue (Expr, 1);
 
     } else {
         unsigned Flags;
@@ -2162,7 +2261,7 @@ static void hie_internal (const GenDesc* Ops,   /* List of generators */
             }
 
             /* Limit the calculated value to the range of its type */
-            LimitExprValue (Expr);
+            LimitExprValue (Expr, 1);
 
         } else if (lconst && (Gen->Flags & GEN_COMM) && !rconst) {
             /* If the LHS constant is an int that fits into an unsigned char, change the
@@ -2789,7 +2888,7 @@ static void parseadd (ExprDesc* Expr, int DoArrayRef)
                         Expr->Type = rhst;
                     } else {
                         /* Limit the calculated value to the range of its type */
-                        LimitExprValue (Expr);
+                        LimitExprValue (Expr, 1);
                     }
 
                     /* The result is always an rvalue */
@@ -3260,7 +3359,7 @@ static void parsesub (ExprDesc* Expr)
                     /* Just adjust the result type */
                     Expr->Type = ArithmeticConvert (Expr->Type, Expr2.Type);
                     /* And limit the calculated value to the range of it */
-                    LimitExprValue (Expr);
+                    LimitExprValue (Expr, 1);
                 }
                 /* The result is always an rvalue */
                 ED_MarkExprAsRVal (Expr);
@@ -3863,9 +3962,9 @@ static void hieQuest (ExprDesc* Expr)
 
             ED_FinalizeRValLoad (&Expr2);
         } else {
-            /* Constant boolean subexpression could still have deferred inc/
-            ** dec operations, so just flush their side-effects at this
-            ** sequence point.
+            /* Constant subexpression could still have deferred inc/dec
+            ** operations, so just flush their side-effects at this sequence
+            ** point.
             */
             DoDeferred (SQP_KEEP_NONE, &Expr2);
         }
@@ -3901,7 +4000,7 @@ static void hieQuest (ExprDesc* Expr)
         /* Parse third expression. Remember for later if it is a NULL pointer
         ** expression, then load it into the primary.
         */
-        ExprWithCheck (hie1, &Expr3);
+        ExprWithCheck (hieQuest, &Expr3);
         Expr3IsNULL = ED_IsNullPtr (&Expr3);
         if (!IsTypeVoid (Expr3.Type)    &&
             ED_YetToLoad (&Expr3)       &&
@@ -3914,9 +4013,9 @@ static void hieQuest (ExprDesc* Expr)
 
             ED_FinalizeRValLoad (&Expr3);
         } else {
-            /* Constant boolean subexpression could still have deferred inc/
-            ** dec operations, so just flush their side-effects at this
-            ** sequence point.
+            /* Constant subexpression could still have deferred inc/dec
+            ** operations, so just flush their side-effects at this sequence
+            ** point.
             */
             DoDeferred (SQP_KEEP_NONE, &Expr3);
         }
@@ -4030,6 +4129,8 @@ static void hieQuest (ExprDesc* Expr)
             } else {
                 *Expr = Expr3;
             }
+            /* The result expression is always an rvalue */
+            ED_MarkExprAsRVal (Expr);
         }
 
         /* Setup the target expression */
