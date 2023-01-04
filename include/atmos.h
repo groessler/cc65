@@ -133,7 +133,7 @@
 /* The addresses of the static drivers */
 extern unsigned char atmos_pase_joy[];           /* Referred to by joy_static_stddrv[] */
 extern unsigned char atmos_ijk_joy[];
-extern unsigned char atmos_acia_ser[];
+extern unsigned char atmos_acia_ser[];           /* Referred to by ser_static_stddrv[] */
 extern unsigned char atmos_228_200_3_tgi[];
 extern unsigned char atmos_240_200_2_tgi[];      /* Referred to by tgi_static_stddrv[] */
 

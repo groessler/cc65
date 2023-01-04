@@ -105,7 +105,7 @@
 
 /* The addresses of the static drivers */
 extern unsigned char cbm610_ram_emd[];
-extern unsigned char cbm610_std_ser[];
+extern unsigned char cbm610_std_ser[];   /* Referred to by ser_static_stddrv[] */
 
 
 

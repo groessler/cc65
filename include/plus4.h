@@ -56,7 +56,7 @@
 
 /* The addresses of the static drivers */
 extern unsigned char plus4_stdjoy_joy[];   /* Referred to by joy_static_stddrv[] */
-extern unsigned char plus4_stdser_ser[];
+extern unsigned char plus4_stdser_ser[];   /* Referred to by ser_static_stddrv[] */
 
 
 

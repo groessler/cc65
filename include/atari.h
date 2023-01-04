@@ -263,7 +263,7 @@ extern unsigned char atrst_mou[];                /* referred to by mouse_static_
 extern unsigned char atrami_mou[];
 extern unsigned char atrtrk_mou[];
 extern unsigned char atrtt_mou[];
-extern unsigned char atrrdev_ser[];
+extern unsigned char atrrdev_ser[];              /* referred to by ser_static_stddrv[] */
 extern unsigned char atr3_tgi[];
 extern unsigned char atr4_tgi[];
 extern unsigned char atr5_tgi[];
@@ -288,7 +288,7 @@ extern unsigned char atrxst_mou[];               /* referred to by mouse_static_
 extern unsigned char atrxami_mou[];
 extern unsigned char atrxtrk_mou[];
 extern unsigned char atrxtt_mou[];
-extern unsigned char atrxrdev_ser[];
+extern unsigned char atrxrdev_ser[];             /* referred to by ser_static_stddrv[] */
 extern unsigned char atrx3_tgi[];
 extern unsigned char atrx4_tgi[];
 extern unsigned char atrx5_tgi[];

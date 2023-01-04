@@ -171,7 +171,7 @@ extern struct {
 extern unsigned char a2_auxmem_emd[];
 extern unsigned char a2_stdjoy_joy[];     /* Referred to by joy_static_stddrv[]   */
 extern unsigned char a2_stdmou_mou[];     /* Referred to by mouse_static_stddrv[] */
-extern unsigned char a2_ssc_ser[];
+extern unsigned char a2_ssc_ser[];        /* Referred to by ser_static_stddrv[]   */
 extern unsigned char a2_hi_tgi[];         /* Referred to by tgi_static_stddrv[]   */
 extern unsigned char a2_lo_tgi[];
 #endif

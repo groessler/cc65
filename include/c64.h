@@ -155,7 +155,7 @@ extern unsigned char c64_1351_mou[];             /* Referred to by mouse_static_
 extern unsigned char c64_joy_mou[];
 extern unsigned char c64_inkwell_mou[];
 extern unsigned char c64_pot_mou[];
-extern unsigned char c64_swlink_ser[];
+extern unsigned char c64_swlink_ser[];           /* Referred to by ser_static_stddrv[] */
 extern unsigned char c64_hi_tgi[];               /* Referred to by tgi_static_stddrv[] */
 
 
