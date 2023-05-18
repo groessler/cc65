@@ -43,6 +43,11 @@ jobs:
       - name: Build the document files.
         shell: bash
         run: make -j2 doc
+      - name: Upload a documents snapshot.
+        uses: actions/upload-artifact@v3
+        with:
+          name: docs
+          path: ./html
       - name: Build 64-bit Windows versions of the tools.
         run: |
           make -C src clean
@@ -67,7 +72,3 @@ jobs:
 
       - name: Build app (release)
         run: msbuild src\cc65.sln -t:rebuild -property:Configuration=Release
-
-      # The regression tests are currently too slow to run for this Windows build,
-      # but the "Windows Test Manual" workflow (windows-test-manual.yml) can by
-      # manually dispatched from the Actions menu to test as needed.
