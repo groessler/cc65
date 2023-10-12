@@ -100,6 +100,7 @@ extern unsigned char a2e_auxmem_emd[];
 extern unsigned char a2e_stdjoy_joy[];     /* Referred to by joy_static_stddrv[]   */
 extern unsigned char a2e_stdmou_mou[];     /* Referred to by mouse_static_stddrv[] */
 extern unsigned char a2e_ssc_ser[];        /* Referred to by ser_static_stddrv[]   */
+extern unsigned char a2e_gs_ser[];         /* IIgs serial driver                   */
 extern unsigned char a2e_hi_tgi[];         /* Referred to by tgi_static_stddrv[]   */
 extern unsigned char a2e_lo_tgi[];
 

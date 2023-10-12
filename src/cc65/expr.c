@@ -1035,6 +1035,10 @@ static void FunctionCall (ExprDesc* Expr)
     /* Parse the argument list and pass them to the called function */
     ArgSize = FunctionArgList (Func, IsFastcall, Expr);
 
+    if (ArgSize > 0xFF && (Func->Flags & FD_VARIADIC) != 0) {
+        Error ("Total size of all arguments passed to a variadic function cannot exceed 255 bytes");
+    }
+
     /* We need the closing paren here */
     ConsumeRParen ();
 
@@ -1439,7 +1443,7 @@ static void StructRef (ExprDesc* Expr)
     /* Skip the token and check for an identifier */
     NextToken ();
     if (CurTok.Tok != TOK_IDENT) {
-        Error ("Identifier expected");
+        Error ("Identifier expected for %s member", GetBasicTypeName (Expr->Type));
         /* Make the expression an integer at address zero */
         ED_MakeConstAbs (Expr, 0, type_int);
         return;
