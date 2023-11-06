@@ -49,6 +49,7 @@
 #include "initdata.h"
 #include "loadexpr.h"
 #include "locals.h"
+#include "seqpoint.h"
 #include "stackptr.h"
 #include "standard.h"
 #include "staticassert.h"
@@ -164,7 +165,7 @@ static void ParseRegisterDecl (Declarator* Decl, int Reg)
             LoadExpr (CF_NONE, &Expr);
 
             /* Store the value into the variable */
-            g_putstatic (CF_REGVAR | TypeOf (Sym->Type), Reg, 0);
+            g_putstatic (CF_REGVAR | CG_TypeOf (Sym->Type), Reg, 0);
 
             /* This has to be done at sequence point */
             DoDeferred (SQP_KEEP_NONE, &Expr);
@@ -274,7 +275,7 @@ static void ParseAutoDecl (Declarator* Decl)
                 }
 
                 /* Push the value */
-                g_push (Flags | TypeOf (Sym->Type), Expr.IVal);
+                g_push (Flags | CG_TypeOf (Sym->Type), Expr.IVal);
 
                 /* This has to be done at sequence point */
                 DoDeferred (SQP_KEEP_NONE, &Expr);
@@ -353,7 +354,7 @@ static void ParseAutoDecl (Declarator* Decl)
                 LoadExpr (CF_NONE, &Expr);
 
                 /* Store the value into the variable */
-                g_putstatic (CF_STATIC | TypeOf (Sym->Type), DataLabel, 0);
+                g_putstatic (CF_STATIC | CG_TypeOf (Sym->Type), DataLabel, 0);
 
                 /* This has to be done at sequence point */
                 DoDeferred (SQP_KEEP_NONE, &Expr);

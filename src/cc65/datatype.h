@@ -215,6 +215,8 @@ struct Type {
 extern const Type type_char[];
 extern const Type type_schar[];
 extern const Type type_uchar[];
+extern const Type type_short[];
+extern const Type type_ushort[];
 extern const Type type_int[];
 extern const Type type_uint[];
 extern const Type type_long[];
@@ -482,6 +484,9 @@ const Type* GetUnderlyingType (const Type* Type);
 const Type* GetStructReplacementType (const Type* SType);
 /* Get a replacement type for passing a struct/union by value in the primary */
 
+const Type* GetBitFieldDeclType (const Type* Type);
+/* Get the original integer type used to declare the bit-field */
+
 const Type* GetBitFieldChunkType (const Type* Type);
 /* Get the type needed to operate on the byte chunk containing the bit-field */
 
@@ -691,6 +696,17 @@ INLINE int IsTypeFuncPtr (const Type* T)
 #endif
 
 #if defined(HAVE_INLINE)
+INLINE int IsTypeFuncLike (const Type* T)
+/* Return true if this is a function or a function pointer */
+{
+    return IsTypeFunc (T) || IsTypeFuncPtr (T);
+}
+#else
+int IsTypeFuncLike (const Type* T);
+/* Return true if this is a function or a function pointer */
+#endif
+
+#if defined(HAVE_INLINE)
 INLINE int IsClassInt (const Type* T)
 /* Return true if this is an integer type */
 {
@@ -761,6 +777,9 @@ int IsDerivedType (const Type* T);
 int IsAggregateType (const Type* T);
 /* Return true if this is an array or struct type */
 
+int IsDerivedDeclaratorType (const Type* T);
+/* Return true if this is an array, function or pointer type */
+
 int IsRelationType (const Type* T);
 /* Return true if this is an arithmetic, array or pointer type */
 
@@ -772,6 +791,12 @@ int IsESUType (const Type* T);
 
 int IsIncompleteESUType (const Type* T);
 /* Return true if this is an incomplete ESU type */
+
+int IsPassByRefType (const Type* T);
+/* Return true if this is a large struct/union type that doesn't fit in the
+** primary. This returns false for the void value extension type since it is
+** not passable at all.
+*/
 
 int IsEmptiableObjectType (const Type* T);
 /* Return true if this is a struct/union/void type that can have zero size */
@@ -1024,7 +1049,7 @@ void SetESUTagSym (Type* T, struct SymEntry* S);
 
 const char* GetBasicTypeName (const Type* T);
 /* Return a const name string of the basic type.
-** Return "type" for unknown basic types.
+** Return "<type>" for unknown basic types.
 */
 
 const char* GetFullTypeName (const Type* T);

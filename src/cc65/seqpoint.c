@@ -1,15 +1,12 @@
 /*****************************************************************************/
 /*                                                                           */
-/*                                 pragma.h                                  */
+/*                                 seqpoint.h                                */
 /*                                                                           */
-/*                  Pragma handling for the cc65 C compiler                  */
+/*                     Stuff involved in sequence points                     */
 /*                                                                           */
 /*                                                                           */
 /*                                                                           */
-/* (C) 1998-2002, Ullrich von Bassewitz                                      */
-/*                Roemerstrasse 52                                           */
-/*                D-70794 Filderstadt                                        */
-/* EMail:         uz@cc65.org                                                */
+/* Copyright 2022 The cc65 Authors                                           */
 /*                                                                           */
 /*                                                                           */
 /* This software is provided 'as-is', without any expressed or implied       */
@@ -33,24 +30,38 @@
 
 
 
-#ifndef PRAGMA_H
-#define PRAGMA_H
+/* cc65 */
+#include "seqpoint.h"
 
 
 
 /*****************************************************************************/
-/*                                   Code                                    */
+/*                                   data                                    */
 /*****************************************************************************/
 
 
 
-void ConsumePragma (void);
-/* Parse a pragma. The pragma comes always in the form of the new C99 _Pragma()
-** operator.
-*/
+/* Remeber if __A__, __AX__ and __EAX__ are being used */
+unsigned PendingSqpFlags = SQP_KEEP_NONE;
 
 
 
-/* End of pragma.h */
+/*****************************************************************************/
+/*                                   code                                    */
+/*****************************************************************************/
 
-#endif
+
+
+void SetSQPFlags (unsigned Flags)
+/* Set the SQP_KEEP_* flags for the deferred operations in the statement */
+{
+    PendingSqpFlags = Flags;
+}
+
+
+
+unsigned GetSQPFlags (void)
+/* Get the SQP_KEEP_* flags for the deferred operations in the statement */
+{
+    return PendingSqpFlags;
+}

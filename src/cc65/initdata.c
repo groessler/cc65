@@ -58,6 +58,7 @@
 #include "litpool.h"
 #include "pragma.h"
 #include "scanner.h"
+#include "seqpoint.h"
 #include "shift.h"
 #include "standard.h"
 #include "symtab.h"
@@ -168,12 +169,12 @@ static void DefineData (ExprDesc* Expr)
 
         case E_LOC_NONE:
             /* Immediate numeric value with no storage */
-            g_defdata (CF_IMM | TypeOf (Expr->Type) | CF_CONST, Expr->IVal, 0);
+            g_defdata (CF_IMM | CG_TypeOf (Expr->Type) | CF_CONST, Expr->IVal, 0);
             break;
 
         case E_LOC_ABS:
             /* Absolute numeric address */
-            g_defdata (CF_ABSOLUTE | TypeOf (Expr->Type) | CF_CONST, Expr->IVal, 0);
+            g_defdata (CF_ABSOLUTE | CG_TypeOf (Expr->Type) | CF_CONST, Expr->IVal, 0);
             break;
 
         case E_LOC_GLOBAL:
@@ -244,9 +245,6 @@ static void DefineBitFieldData (StructInitData* SI)
 
 static void DefineStrData (Literal* Lit, unsigned Count)
 {
-    /* Translate into target charset */
-    TranslateLiteral (Lit);
-
     /* Output the data */
     g_defbytes (GetLiteralStr (Lit), Count);
 }

@@ -1,15 +1,12 @@
 /*****************************************************************************/
 /*                                                                           */
-/*                                 pragma.h                                  */
+/*                                 seqpoint.h                                */
 /*                                                                           */
-/*                  Pragma handling for the cc65 C compiler                  */
+/*                     Stuff involved in sequence points                     */
 /*                                                                           */
 /*                                                                           */
 /*                                                                           */
-/* (C) 1998-2002, Ullrich von Bassewitz                                      */
-/*                Roemerstrasse 52                                           */
-/*                D-70794 Filderstadt                                        */
-/* EMail:         uz@cc65.org                                                */
+/* Copyright 2022 The cc65 Authors                                           */
 /*                                                                           */
 /*                                                                           */
 /* This software is provided 'as-is', without any expressed or implied       */
@@ -33,24 +30,41 @@
 
 
 
-#ifndef PRAGMA_H
-#define PRAGMA_H
+#ifndef SEQPOINT_H
+#define SEQPOINT_H
 
 
 
 /*****************************************************************************/
-/*                                   Code                                    */
+/*                                   data                                    */
 /*****************************************************************************/
 
 
 
-void ConsumePragma (void);
-/* Parse a pragma. The pragma comes always in the form of the new C99 _Pragma()
-** operator.
-*/
+#define SQP_KEEP_NONE   0x00U
+#define SQP_KEEP_A      0x01U
+#define SQP_KEEP_AX     0x03U
+#define SQP_KEEP_EAX    0x07U
+#define SQP_MASK_EAX    0x07U
+#define SQP_KEEP_TEST   0x10U
+#define SQP_KEEP_EXPR   0x17U       /* SQP_KEEP_TEST | SQP_KEEP_EAX */
 
 
 
-/* End of pragma.h */
+/*****************************************************************************/
+/*                                   code                                    */
+/*****************************************************************************/
+
+
+
+void SetSQPFlags (unsigned Flags);
+/* Set the SQP_KEEP_* flags for the deferred operations in the statement */
+
+unsigned GetSQPFlags (void);
+/* Get the SQP_KEEP_* flags for the deferred operations in the statement */
+
+
+
+/* End of seqpoint.h */
 
 #endif

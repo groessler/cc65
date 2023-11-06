@@ -111,12 +111,6 @@ static void Parse (void)
             continue;
         }
 
-        /* Check for a #pragma */
-        if (CurTok.Tok == TOK_PRAGMA) {
-            DoPragma ();
-            continue;
-        }
-
         /* Check for a _Static_assert */
         if (CurTok.Tok == TOK_STATIC_ASSERT) {
             ParseStaticAssert ();
@@ -291,11 +285,14 @@ static void Parse (void)
                         */
                         const char* bssName = GetSegName (SEG_BSS);
 
-                        if (Sym->V.BssName && strcmp (Sym->V.BssName, bssName) != 0) {
-                            Error ("Global variable '%s' already was defined in the '%s' segment.",
-                                   Sym->Name, Sym->V.BssName);
+                        if (Sym->V.BssName != 0) {
+                            if (strcmp (Sym->V.BssName, bssName) != 0) {
+                                Error ("Global variable '%s' already was defined in the '%s' segment",
+                                       Sym->Name, Sym->V.BssName);
+                            }
+                        } else {
+                            Sym->V.BssName = xstrdup (bssName);
                         }
-                        Sym->V.BssName = xstrdup (bssName);
 
                         /* This is to make the automatical zeropage setting of the symbol
                         ** work right.
@@ -517,7 +514,7 @@ void Compile (const char* FileName)
 
                     /* Mark as defined; so that it will be exported, not imported */
                     Entry->Flags |= SC_DEF;
-                } else {
+                } else if (!IsTypeArray (Entry->Type)) {
                     /* Tentative declared variable is still of incomplete type */
                     Error ("Definition of '%s' has type '%s' that is never completed",
                            Entry->Name,

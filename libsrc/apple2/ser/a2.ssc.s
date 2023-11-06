@@ -70,6 +70,8 @@ ACIA_STATUS    := ACIA+1        ; Status register
 ACIA_CMD       := ACIA+2        ; Command register
 ACIA_CTRL      := ACIA+3        ; Control register
 
+SLTROMSEL      := $C02D         ; For Apple IIgs slot verification
+
 ;----------------------------------------------------------------------------
 ; Global variables
 
@@ -85,6 +87,7 @@ SendFreeCnt:    .res    1       ; Number of free bytes in send buffer
 Stopped:        .res    1       ; Flow-stopped flag
 RtsOff:         .res    1       ; Cached value of command register with
                                 ; flow stopped
+HSType:         .res    1       ; Flow-control type
 
 RecvBuf:        .res    256     ; Receive buffer: 256 bytes
 SendBuf:        .res    256     ; Send buffer: 256 bytes
@@ -141,35 +144,16 @@ ParityTable:                    ; Table used to translate RS232 parity param
         .byte   $A0             ; SER_PAR_MARK
         .byte   $E0             ; SER_PAR_SPACE
 
-IdOfsTable:                     ; Table of bytes positions, used to check five
+IdOfsTable:                     ; Table of bytes positions, used to check four
                                 ; specific bytes on the slot's firmware to make
-                                ; sure this is an SSC (or Apple //c comm port)
-                                ; firmware that drives an ACIA 6551 chip.
-                                ;
-                                ; The SSC firmware and the Apple //c(+) comm
-                                ; port firmware all begin with a BIT instruction.
-                                ; The IIgs, on the other hand, has a
-                                ; Zilog Z8530 chip and its firmware starts with
-                                ; a SEP instruction. We don't want to load this
-                                ; driver on the IIgs' serial port. We'll
-                                ; differentiate the firmware on this byte.
-                                ;
-                                ; The next four bytes we check are the Pascal
-                                ; Firmware Protocol Bytes that identify a
-                                ; serial card. Those are the same bytes for
-                                ; SSC firmwares, Apple //c firmwares and IIgs
-                                ; Zilog Z8530 firmwares - which is the reason
-                                ; we have to check for the firmware's first
-                                ; instruction too.
-        .byte   $00             ; First instruction
+                                ; sure this is a serial card.
         .byte   $05             ; Pascal 1.0 ID byte
         .byte   $07             ; Pascal 1.0 ID byte
         .byte   $0B             ; Pascal 1.1 generic signature byte
         .byte   $0C             ; Device signature byte
 
-IdValTable:                     ; Table of expected values for the five checked
+IdValTable:                     ; Table of expected values for the four checked
                                 ; bytes
-        .byte   $2C             ; BIT
         .byte   $38             ; ID Byte 0 (from Pascal 1.0), fixed
         .byte   $18             ; ID Byte 1 (from Pascal 1.0), fixed
         .byte   $01             ; Generic signature for Pascal 1.1, fixed
@@ -213,9 +197,32 @@ SER_CLOSE:
 ;----------------------------------------------------------------------------
 ; SER_OPEN: A pointer to a ser_params structure is passed in ptr1.
 ; Must return an SER_ERR_xx code in a/x.
+; Note: Hardware checks are done in SER_OPEN instead of SER_INSTALL,
+; because they depend on the selected slot, and we can't select the slot
+; before SER_INSTALL.
 
 SER_OPEN:
-        ldx     #<$C000
+        ; Check if this is a IIgs (Apple II Miscellaneous TechNote #7,
+        ; Apple II Family Identification)
+        sec
+        bit     $C082
+        jsr     $FE1F
+        bit     $C080
+
+        bcs     NotIIgs
+
+        ; We're on a IIgs. For every slot N, either bit N of $C02D is
+        ; 0 for the internal ROM, or 1 for "Your Card". Let's make sure
+        ; that slot N's bit is set to 1, otherwise, that can't be an SSC.
+
+        ldy     Slot
+        lda     SLTROMSEL
+:       lsr
+        dey
+        bpl     :-              ; Shift until slot's bit ends in carry
+        bcc     NoDev
+
+NotIIgs:ldx     #<$C000
         stx     ptr2
         lda     #>$C000
         ora     Slot
@@ -239,11 +246,45 @@ SER_OPEN:
 .endif
         tax
 
+        ; Check that this works like an ACIA 6551 is expected to work
+
+        lda     ACIA_STATUS,x   ; Save current values in what we expect to be
+        sta     tmp1            ; the ACIA status register
+        lda     ACIA_CMD,x      ; and command register. So we can restore them
+        sta     tmp2            ; if this isn't a 6551.
+
+        ldy     #%00000010      ; Disable TX/RX, disable IRQ
+:       tya
+        sta     ACIA_CMD,x
+        cmp     ACIA_CMD,x      ; Verify what we stored is there
+        bne     NotAcia
+        iny                     ; Enable TX/RX, disable IRQ
+        cpy     #%00000100
+        bne     :-
+        sta     ACIA_STATUS,x   ; Reset ACIA
+        lda     ACIA_CMD,x      ; Check that RX/TX is disabled
+        lsr
+        bcc     AciaOK
+
+NotAcia:lda     tmp2            ; Restore original values
+        sta     ACIA_CMD,x
+        lda     tmp1
+        sta     ACIA_STATUS,x
+
+NoDev:  lda     #SER_ERR_NO_DEVICE
+        bne     Out
+
         ; Check if the handshake setting is valid
-        ldy     #SER_PARAMS::HANDSHAKE
+AciaOK: ldy     #SER_PARAMS::HANDSHAKE
         lda     (ptr1),y
-        cmp     #SER_HS_HW      ; This is all we support
-        bne     InvParm
+        cmp     #SER_HS_SW      ; Not supported
+        bne     HandshakeOK
+
+        lda     #SER_ERR_INIT_FAILED
+        bne     Out
+
+HandshakeOK:
+        sta     HSType          ; Store flow control type
 
         ldy     #$00            ; Initialize buffers
         sty     Stopped
@@ -261,9 +302,12 @@ SER_OPEN:
         lda     (ptr1),y        ; Baudrate index
         tay
         lda     BaudTable,y     ; Get 6551 value
-        bmi     InvBaud         ; Branch if rate not supported
-        sta     tmp1
+        bpl     BaudOK          ; Check that baudrate is supported
 
+        lda     #SER_ERR_BAUD_UNAVAIL
+        bne     Out
+
+BaudOK: sta     tmp1
         ldy     #SER_PARAMS::DATABITS
         lda     (ptr1),y        ; Databits index
         tay
@@ -294,22 +338,7 @@ SER_OPEN:
         ; Done
         stx     Index           ; Mark port as open
         lda     #SER_ERR_OK
-        .assert SER_ERR_OK = 0, error
-        tax
-        rts
-
-        ; Device (hardware) not found
-NoDev:  lda     #SER_ERR_NO_DEVICE
-        ldx     #$00            ; Promote char return value
-        rts
-
-        ; Invalid parameter
-InvParm:lda     #SER_ERR_INIT_FAILED
-        ldx     #$00            ; Promote char return value
-        rts
-
-        ; Baud rate not available
-InvBaud:lda     #SER_ERR_BAUD_UNAVAIL
+Out:
         ldx     #$00            ; Promote char return value
         rts
 
@@ -447,11 +476,14 @@ SER_IRQ:
         bcc     Flow            ; Assert flow control if buffer space low
         rts                     ; Interrupt handled (carry already set)
 
-Flow:   ldx     Index           ; Assert flow control if buffer space too low
-lda     RtsOff
+Flow:   lda     HSType          ; Don't touch if no flow control
+        beq     IRQDone
+
+        ldx     Index           ; Assert flow control if buffer space too low
+        lda     RtsOff
         sta     ACIA_CMD,x
         sta     Stopped
-        sec                     ; Interrupt handled
+IRQDone:sec                     ; Interrupt handled
 Done:   rts
 
 ;----------------------------------------------------------------------------
@@ -479,4 +511,4 @@ Send:   ldy     SendHead        ; Get first byte to send
         sta     ACIA_DATA,x     ; Send it
         inc     SendHead
         inc     SendFreeCnt
-        jmp     NextByte        ; And try next one
+        bne     NextByte        ; And try next one
