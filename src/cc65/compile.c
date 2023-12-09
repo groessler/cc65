@@ -94,6 +94,8 @@ static void Parse (void)
     while (CurTok.Tok != TOK_CEOF) {
 
         DeclSpec        Spec;
+        int             NeedClean = 0;
+        unsigned        PrevErrorCount = ErrorCount;
 
         /* Check for empty statements */
         if (CurTok.Tok == TOK_SEMI) {
@@ -144,7 +146,11 @@ static void Parse (void)
             Declarator Decl;
 
             /* Read the next declaration */
-            ParseDecl (&Spec, &Decl, DM_NEED_IDENT);
+            NeedClean = ParseDecl (&Spec, &Decl, DM_NEED_IDENT);
+            if (Decl.Ident[0] == '\0') {
+                Sym = 0;
+                goto NextDecl;
+            }
 
             /* Check if we must reserve storage for the variable. We do this,
             **
@@ -251,6 +257,7 @@ static void Parse (void)
 
                     /* Parse the initialization */
                     ParseInit (Sym->Type);
+
                 } else {
 
                     /* This is a declaration */
@@ -310,6 +317,7 @@ static void Parse (void)
 
             }
 
+NextDecl:
             /* Check for end of declaration list */
             if (CurTok.Tok == TOK_COMMA) {
                 NextToken ();
@@ -319,35 +327,41 @@ static void Parse (void)
             }
         }
 
-        /* Function declaration? */
-        if (Sym && IsTypeFunc (Sym->Type)) {
-
-            /* Function */
-            if (CurTok.Tok == TOK_SEMI) {
-                /* Prototype only */
-                NextToken ();
-            } else if (CurTok.Tok == TOK_LCURLY) {
-                /* ISO C: The type category in a function definition cannot be
-                ** inherited from a typedef.
-                */
+        /* Finish the declaration */
+        if (Sym) {
+            /* Function definition? */
+            if (IsTypeFunc (Sym->Type) && CurTok.Tok == TOK_LCURLY) {
                 if (IsTypeFunc (Spec.Type) && TypeCmp (Sym->Type, Spec.Type).C >= TC_EQUAL) {
+                    /* ISO C: The type category in a function definition cannot be
+                    ** inherited from a typedef.
+                    */
                     Error ("Function cannot be defined with a typedef");
                 } else if (comma) {
+                    /* ISO C: A function definition cannot shall its return type
+                    ** specifier with other declarators.
+                    */
                     Error ("';' expected after top level declarator");
                 }
 
                 /* Parse the function body anyways */
+                NeedClean = 0;
                 NewFunc (Sym, FuncDef);
 
                 /* Make sure we aren't omitting any work */
                 CheckDeferredOpAllDone ();
+            } else {
+                /* Must be followed by a semicolon */
+                if (ConsumeSemi ()) {
+                    NeedClean = 0;
+                } else {
+                    NeedClean = -1;
+                }
             }
+        }
 
-        } else {
-
-            /* Must be followed by a semicolon */
-            ConsumeSemi ();
-
+        /* Try some smart error recovery */
+        if (PrevErrorCount != ErrorCount && NeedClean < 0) {
+            SmartErrorSkip (1);
         }
     }
 
