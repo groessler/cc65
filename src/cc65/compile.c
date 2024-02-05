@@ -121,15 +121,13 @@ static void Parse (void)
         }
 
         /* Read the declaration specifier */
-        ParseDeclSpec (&Spec, TS_DEFAULT_TYPE_INT, SC_EXTERN | SC_STATIC);
+        ParseDeclSpec (&Spec, TS_DEFAULT_TYPE_INT | TS_FUNCTION_SPEC, SC_NONE);
 
         /* Don't accept illegal storage classes */
-        if ((Spec.StorageClass & SC_TYPEMASK) == 0) {
-            if ((Spec.StorageClass & SC_AUTO) != 0 ||
-                (Spec.StorageClass & SC_REGISTER) != 0) {
-                Error ("Illegal storage class");
-                Spec.StorageClass = SC_EXTERN | SC_STATIC;
-            }
+        if ((Spec.StorageClass & SC_STORAGEMASK) == SC_AUTO ||
+            (Spec.StorageClass & SC_STORAGEMASK) == SC_REGISTER) {
+            Error ("Illegal storage class");
+            Spec.StorageClass &= ~SC_STORAGEMASK;
         }
 
         /* Check if this is only a type declaration */
@@ -165,33 +163,32 @@ static void Parse (void)
                 break;
             }
 
-            /* Check if we must reserve storage for the variable. We do this,
-            **
-            **   - if it is not a typedef or function,
-            **   - if we don't had a storage class given ("int i")
-            **   - if the storage class is explicitly specified as static,
-            **   - or if there is an initialization.
-            **
-            ** This means that "extern int i;" will not get storage allocated.
-            */
-            if ((Decl.StorageClass & SC_FUNC) != SC_FUNC &&
+            /* The symbol is now visible in the file scope */
+            if ((Decl.StorageClass & SC_TYPEMASK) != SC_FUNC &&
                 (Decl.StorageClass & SC_TYPEMASK) != SC_TYPEDEF) {
-                if ((Spec.Flags & DS_DEF_STORAGE) != 0                       ||
-                    (Decl.StorageClass & (SC_EXTERN|SC_STATIC)) == SC_STATIC ||
-                    ((Decl.StorageClass & SC_EXTERN) != 0 &&
+                /* Check if we must reserve storage for the variable. We do this,
+                **
+                **   - if it is not a typedef or function,
+                **   - if we don't had a storage class given ("int i")
+                **   - if the storage class is explicitly specified as static,
+                **   - or if there is an initialization.
+                **
+                ** This means that "extern int i;" will not get storage allocated
+                ** in this translation unit.
+                */
+                if ((Decl.StorageClass & SC_STORAGEMASK) == SC_NONE     ||
+                    (Decl.StorageClass & SC_STORAGEMASK) == SC_STATIC   ||
+                    ((Decl.StorageClass & SC_STORAGEMASK) == SC_EXTERN &&
                      CurTok.Tok == TOK_ASSIGN)) {
-                    /* We will allocate storage */
-                    Decl.StorageClass |= SC_STORAGE;
-                } else {
-                    /* It's a declaration */
-                    Decl.StorageClass |= SC_DECL;
+                    /* We will allocate storage in this translation unit */
+                    Decl.StorageClass |= SC_TU_STORAGE;
                 }
             }
 
             /* If this is a function declarator that is not followed by a comma
             ** or semicolon, it must be followed by a function body.
             */
-            if ((Decl.StorageClass & SC_FUNC) != 0) {
+            if ((Decl.StorageClass & SC_TYPEMASK) == SC_FUNC) {
                 if (CurTok.Tok == TOK_LCURLY) {
                     /* A definition */
                     Decl.StorageClass |= SC_DEF;
@@ -205,8 +202,6 @@ static void Parse (void)
                     }
                 } else {
                     /* Just a declaration */
-                    Decl.StorageClass |= SC_DECL;
-
                     FuncDef = GetFuncDesc (Decl.Type);
                     if ((FuncDef->Flags & (FD_EMPTY | FD_OLDSTYLE)) == FD_OLDSTYLE) {
                         /* A parameter list without types is only allowed in a
@@ -224,7 +219,7 @@ static void Parse (void)
             SymUseAttr (Sym, &Decl);
 
             /* Reserve storage for the variable if we need to */
-            if (Decl.StorageClass & SC_STORAGE) {
+            if (Decl.StorageClass & SC_TU_STORAGE) {
 
                 /* Get the size of the variable */
                 unsigned Size = SizeOf (Decl.Type);
@@ -327,9 +322,13 @@ static void Parse (void)
                 }
 
                 /* Make the symbol zeropage according to the segment address size */
-                if ((Sym->Flags & SC_STATIC) != 0) {
-                    if (GetSegAddrSize (GetSegName (CS->CurDSeg)) == ADDR_SIZE_ZP) {
-                        Sym->Flags |= SC_ZEROPAGE;
+                if ((Sym->Flags & SC_TYPEMASK) == SC_NONE) {
+                    if (SymIsGlobal (Sym) ||
+                        (Sym->Flags & SC_STORAGEMASK) == SC_STATIC ||
+                        (Sym->Flags & SC_STORAGEMASK) == SC_REGISTER) {
+                        if (GetSegAddrSize (GetSegName (CS->CurDSeg)) == ADDR_SIZE_ZP) {
+                            Sym->Flags |= SC_ZEROPAGE;
+                        }
                     }
                 }
 
@@ -517,7 +516,10 @@ void Compile (const char* FileName)
         ** global variables.
         */
         for (Entry = GetGlobalSymTab ()->SymHead; Entry; Entry = Entry->NextSym) {
-            if ((Entry->Flags & (SC_STORAGE | SC_DEF | SC_STATIC)) == (SC_STORAGE | SC_STATIC)) {
+            /* Is it a global (with or without static) tentative declaration of
+            ** an uninitialized variable?
+            */
+            if ((Entry->Flags & (SC_TU_STORAGE | SC_DEF)) == SC_TU_STORAGE) {
                 /* Assembly definition of uninitialized global variable */
                 SymEntry* TagSym = GetESUTagSym (Entry->Type);
                 unsigned Size = SizeOf (Entry->Type);
@@ -552,11 +554,15 @@ void Compile (const char* FileName)
                            Entry->Name,
                            GetFullTypeName (Entry->Type));
                 }
-            } else if (!SymIsDef (Entry) && (Entry->Flags & SC_FUNC) == SC_FUNC) {
+            } else if (!SymIsDef (Entry) && (Entry->Flags & SC_TYPEMASK) == SC_FUNC) {
                 /* Check for undefined functions */
-                if ((Entry->Flags & (SC_EXTERN | SC_STATIC)) == SC_STATIC && SymIsRef (Entry)) {
+                if ((Entry->Flags & SC_STORAGEMASK) == SC_STATIC && SymIsRef (Entry)) {
                     Warning ("Static function '%s' used but never defined",
                              Entry->Name);
+                } else if ((Entry->Flags & SC_INLINE) != 0) {
+                    Warning ("Inline function '%s' %s but never defined",
+                             Entry->Name,
+                             SymIsRef (Entry) ? "used" : "declared");
                 }
             }
         }
