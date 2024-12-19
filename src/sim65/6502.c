@@ -707,8 +707,9 @@ static unsigned HaveIRQRequest;
         unsigned char OldPCH;                                   \
         ++Cycles;                                               \
         Offs = (signed char) MemReadByte (Regs.PC+1);           \
+        Regs.PC += 2;                                           \
         OldPCH = PCH;                                           \
-        Regs.PC = (Regs.PC + 2 + (int) Offs) & 0xFFFF;          \
+        Regs.PC = (Regs.PC + (int) Offs) & 0xFFFF;              \
         if (PCH != OldPCH) {                                    \
             ++Cycles;                                           \
         }                                                       \
@@ -736,23 +737,29 @@ static unsigned HaveIRQRequest;
 
 /* ROL */
 #define ROL(Val)                                                \
-    Val <<= 1;                                                  \
-    if (GET_CF ()) {                                            \
-        Val |= 0x01;                                            \
-    }                                                           \
-    TEST_ZF (Val);                                              \
-    TEST_SF (Val);                                              \
-    TEST_CF (Val)
+    do {                                                        \
+        unsigned ShiftOut = (Val & 0x80);                       \
+        Val <<= 1;                                              \
+        if (GET_CF ()) {                                        \
+            Val |= 0x01;                                        \
+        }                                                       \
+        TEST_ZF (Val);                                          \
+        TEST_SF (Val);                                          \
+        SET_CF (ShiftOut);                                      \
+    } while (0)
 
 /* ROR */
 #define ROR(Val)                                                \
-    if (GET_CF ()) {                                            \
-        Val |= 0x100;                                           \
-    }                                                           \
-    SET_CF (Val & 0x01);                                        \
-    Val >>= 1;                                                  \
-    TEST_ZF (Val);                                              \
-    TEST_SF (Val)
+    do {                                                        \
+        unsigned ShiftOut = (Val & 0x01);                       \
+        Val >>= 1;                                              \
+        if (GET_CF ()) {                                        \
+            Val |= 0x80;                                        \
+        }                                                       \
+        TEST_ZF (Val);                                          \
+        TEST_SF (Val);                                          \
+        SET_CF (ShiftOut);                                      \
+    } while(0)
 
 /* ASL */
 #define ASL(Val)                                                \
@@ -821,6 +828,12 @@ static unsigned HaveIRQRequest;
 #define BIT(Val)                                                \
     SET_SF (Val & 0x80);                                        \
     SET_OF (Val & 0x40);                                        \
+    SET_ZF ((Val & Regs.AC) == 0)
+
+/* BITIMM */
+/* The BIT instruction with immediate mode addressing only sets
+   the zero flag; the sign and overflow flags are not changed. */
+#define BITIMM(Val)                                             \
     SET_ZF ((Val & Regs.AC) == 0)
 
 /* LDA */
@@ -1964,25 +1977,17 @@ static void OPC_6502_6C (void)
     PC = Regs.PC;
     Lo = MemReadWord (PC+1);
 
-    if (CPU == CPU_6502)
-    {
-         /* Emulate the 6502 bug */
-        Cycles = 5;
-        Regs.PC = MemReadByte (Lo);
-        Hi = (Lo & 0xFF00) | ((Lo + 1) & 0xFF);
-        Regs.PC |= (MemReadByte (Hi) << 8);
+    /* Emulate the buggy 6502 behavior */
+    Cycles = 5;
+    Regs.PC = MemReadByte (Lo);
+    Hi = (Lo & 0xFF00) | ((Lo + 1) & 0xFF);
+    Regs.PC |= (MemReadByte (Hi) << 8);
 
-        /* Output a warning if the bug is triggered */
-        if (Hi != Lo + 1)
-        {
-            Warning ("6502 indirect jump bug triggered at $%04X, ind addr = $%04X",
-                     PC, Lo);
-        }
-    }
-    else
+    /* Output a warning if the bug is triggered */
+    if (Hi != Lo + 1)
     {
-        Cycles = 6;
-        Regs.PC = MemReadWord(Lo);
+        Warning ("6502 indirect jump bug triggered at $%04X, ind addr = $%04X",
+                    PC, Lo);
     }
 
     ParaVirtHooks (&Regs);
@@ -2257,7 +2262,9 @@ static void OPC_6502_88 (void)
 static void OPC_65SC02_89 (void)
 /* Opcode $89: BIT #imm */
 {
-    ALU_OP_IMM (BIT);
+    /* Note: BIT #imm behaves differently from BIT with other addressing modes,
+     * hence the different 'op' argument to the macro. */
+    ALU_OP_IMM (BITIMM);
 }
 
 
@@ -4104,7 +4111,7 @@ unsigned ExecuteInsn (void)
         PUSH (PCL);
         PUSH (Regs.SR & ~BF);
         SET_IF (1);
-        if (CPU != CPU_6502)
+        if (CPU == CPU_65C02)
         {
             SET_DF (0);
         }
@@ -4118,7 +4125,7 @@ unsigned ExecuteInsn (void)
         PUSH (PCL);
         PUSH (Regs.SR & ~BF);
         SET_IF (1);
-        if (CPU != CPU_6502)
+        if (CPU == CPU_65C02)
         {
             SET_DF (0);
         }
