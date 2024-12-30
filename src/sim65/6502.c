@@ -35,11 +35,11 @@
 /*****************************************************************************/
 
 /* Known bugs and limitations of the 65C02 simulation:
- * support currently only on the level of 65SC02:
-   BBRx, BBSx, RMBx, SMBx, WAI, and STP are unsupported
- * BCD flag handling equals 6502 (unchecked if bug is simulated or wrong for
-   6502)
-*/
+ * the WAI ($CB) and STP ($DB) instructions are unsupported.
+ */
+
+#include <stdbool.h>
+#include <stdint.h>
 
 #include "memory.h"
 #include "error.h"
@@ -391,7 +391,7 @@ CPUType CPU;
 typedef void (*OPFunc) (void);
 
 /* The CPU registers */
-static CPURegs Regs;
+CPURegs Regs;
 
 /* Cycles for the current insn */
 static unsigned Cycles;
@@ -579,6 +579,10 @@ static unsigned HaveIRQRequest;
 #define STO_CY_ZPINDY   6
 #define STO_CY_ZPIND    5
 
+#define STO_CY_ABSX_NP    STO_CY_ABSX
+#define STO_CY_ABSY_NP    STO_CY_ABSY
+#define STO_CY_ZPINDY_NP  STO_CY_ZPINDY
+
 /* zp / zp,x / zp,y / abs / abs,x / abs,y / (zp,x) / (zp),y / (zp) */
 #define STO_OP(mode, op)                                        \
     unsigned address;                                           \
@@ -599,13 +603,11 @@ static unsigned HaveIRQRequest;
 /* Execution cycles for R-M-W opcodes */
 #define RMW_CY_ZP       5
 #define RMW_CY_ZPX      6
-#define RMW_CY_ZPY      6
 #define RMW_CY_ABS      6
 #define RMW_CY_ABSX     7
 #define RMW_CY_ABSY     7
-#define RMW_CY_ZPXIND   6
-#define RMW_CY_ZPINDY   5
-#define RMW_CY_ZPIND    5
+#define RMW_CY_ZPXIND   8
+#define RMW_CY_ZPINDY   8
 
 #define RMW_CY_ABSX_NP      RMW_CY_ABSX
 #define RMW_CY_ABSY_NP      RMW_CY_ABSY
@@ -622,14 +624,17 @@ static unsigned HaveIRQRequest;
 /* 2 x Read-Modify-Write opcode helpers (illegal opcodes) */
 
 /* Execution cycles for 2 x R-M-W opcodes */
-#define RMW2_CY_ZP       5
-#define RMW2_CY_ZPX      6
-#define RMW2_CY_ZPY      6
-#define RMW2_CY_ABS      6
-#define RMW2_CY_ABSX     7
-#define RMW2_CY_ABSY     7
-#define RMW2_CY_ZPXIND   8
-#define RMW2_CY_ZPINDY   8
+#define RMW2_CY_ZP          5
+#define RMW2_CY_ZPX         6
+#define RMW2_CY_ABS         6
+#define RMW2_CY_ABSX        7
+#define RMW2_CY_ABSY        7
+#define RMW2_CY_ZPXIND      8
+#define RMW2_CY_ZPINDY      8
+
+#define RMW2_CY_ZPINDY_NP   RMW2_CY_ZPINDY
+#define RMW2_CY_ABSY_NP     RMW2_CY_ABSY
+#define RMW2_CY_ABSX_NP     RMW2_CY_ABSX
 
 /* zp / zp,x / zp,y / abs / abs,x / abs,y / (zp,x) / (zp),y */
 #define ILLx2_OP(mode, op)                                      \
@@ -662,40 +667,85 @@ static unsigned HaveIRQRequest;
     TEST_SF (Regs.AC)
 
 
-/* ADC */
-#define ADC(v)                                                  \
+/* ADC, binary mode (6502 and 65C02) */
+#define ADC_BINARY_MODE(v)                                      \
     do {                                                        \
-        unsigned old = Regs.AC;                                 \
-        unsigned rhs = (v & 0xFF);                              \
-        if (GET_DF ()) {                                        \
-            unsigned lo;                                        \
-            int res;                                            \
-            lo = (old & 0x0F) + (rhs & 0x0F) + GET_CF ();       \
-            if (lo >= 0x0A) {                                   \
-                lo = ((lo + 0x06) & 0x0F) + 0x10;               \
-            }                                                   \
-            Regs.AC = (old & 0xF0) + (rhs & 0xF0) + lo;         \
-            res = (signed char)(old & 0xF0) +                   \
-                  (signed char)(rhs & 0xF0) +                   \
-                  (signed char)lo;                              \
-            TEST_ZF (old + rhs + GET_CF ());                    \
-            TEST_SF (Regs.AC);                                  \
-            if (Regs.AC >= 0xA0) {                              \
-                Regs.AC += 0x60;                                \
-            }                                                   \
-            TEST_CF (Regs.AC);                                  \
-            SET_OF ((res < -128) || (res > 127));               \
-            if (CPU == CPU_65C02) {                             \
-                ++Cycles;                                       \
-            }                                                   \
+        const uint8_t op = v;                                   \
+        const uint8_t OldAC = Regs.AC;                          \
+        bool carry = GET_CF();                                  \
+        Regs.AC = (OldAC + op + carry);                         \
+        const bool NV = Regs.AC >= 0x80;                        \
+        carry = OldAC + op + carry >= 0x100;                    \
+        SET_SF(NV);                                             \
+        SET_OF(((OldAC >= 0x80) ^ NV) & ((op >= 0x80) ^ NV));   \
+        SET_ZF(Regs.AC == 0);                                   \
+        SET_CF(carry);                                          \
+    } while (0)
+
+/* ADC, decimal mode (6502 behavior) */
+#define ADC_DECIMAL_MODE_6502(v)                                \
+    do {                                                        \
+        const uint8_t op = v;                                   \
+        const uint8_t OldAC = Regs.AC;                          \
+        bool carry = GET_CF();                                  \
+        const uint8_t binary_result = OldAC + op + carry;       \
+        uint8_t low_nibble = (OldAC & 15) + (op & 15) + carry;  \
+        if ((carry = low_nibble > 9))                           \
+            low_nibble = (low_nibble - 10) & 15;                \
+        uint8_t high_nibble = (OldAC >> 4) + (op >> 4) + carry; \
+        const bool NV = (high_nibble & 8) != 0;                 \
+        if ((carry = high_nibble > 9))                          \
+            high_nibble = (high_nibble - 10) & 15;              \
+        Regs.AC = (high_nibble << 4) | low_nibble;              \
+        SET_SF(NV);                                             \
+        SET_OF(((OldAC >= 0x80) ^ NV) & ((op >= 0x80) ^ NV));   \
+        SET_ZF(binary_result == 0);                             \
+        SET_CF(carry);                                          \
+    } while (0)
+
+/* ADC, decimal mode (65C02 behavior) */
+#define ADC_DECIMAL_MODE_65C02(v)                               \
+    do {                                                        \
+        const uint8_t op = v;                                   \
+        const uint8_t OldAC = Regs.AC;                          \
+        const bool OldCF = GET_CF();                            \
+        bool carry = OldCF;                                     \
+        uint8_t low_nibble = (OldAC & 15) + (op & 15) + carry;  \
+        if ((carry = low_nibble > 9))                           \
+            low_nibble = (low_nibble - 10) & 15;                \
+        uint8_t high_nibble = (OldAC >> 4) + (op >> 4) + carry; \
+        const bool PrematureSF = (high_nibble & 8) != 0;        \
+        if ((carry = high_nibble > 9))                          \
+            high_nibble = (high_nibble - 10) & 15;              \
+        Regs.AC = (high_nibble << 4) | low_nibble;              \
+        const bool NewZF = Regs.AC == 0;                        \
+        const bool NewSF = Regs.AC >= 0x80;                     \
+        const bool NewOF = ((OldAC >= 0x80) ^ PrematureSF) &    \
+                           ((op    >= 0x80) ^ PrematureSF);     \
+        SET_SF(NewSF);                                          \
+        SET_OF(NewOF);                                          \
+        SET_ZF(NewZF);                                          \
+        SET_CF(carry);                                          \
+        ++Cycles;                                               \
+    } while (0)
+
+/* ADC, 6502 version */
+#define ADC_6502(v)                                             \
+    do {                                                        \
+        if (GET_DF()) {                                         \
+            ADC_DECIMAL_MODE_6502(v);                           \
         } else {                                                \
-            Regs.AC += rhs + GET_CF ();                         \
-            TEST_ZF (Regs.AC);                                  \
-            TEST_SF (Regs.AC);                                  \
-            TEST_CF (Regs.AC);                                  \
-            SET_OF (!((old ^ rhs) & 0x80) &&                    \
-                    ((old ^ Regs.AC) & 0x80));                  \
-            Regs.AC &= 0xFF;                                    \
+            ADC_BINARY_MODE(v);                                 \
+        }                                                       \
+    } while (0)
+
+/* ADC, 65C02 version */
+#define ADC_65C02(v)                                                          \
+    do {                                                        \
+        if (GET_DF()) {                                         \
+            ADC_DECIMAL_MODE_65C02(v);                          \
+        } else {                                                \
+            ADC_BINARY_MODE(v);                                 \
         }                                                       \
     } while (0)
 
@@ -822,7 +872,7 @@ static unsigned HaveIRQRequest;
     }                                                           \
     SET_CF (Val & 0x01);                                        \
     Val >>= 1;                                                  \
-    ADC (Val)
+    ADC_6502 (Val)
 
 /* BIT */
 #define BIT(Val)                                                \
@@ -879,7 +929,7 @@ static unsigned HaveIRQRequest;
 /* ISC */
 #define ISC(Val)                                                \
     Val = (Val + 1) & 0xFF;                                     \
-    SBC(Val)
+    SBC_6502(Val)
 
 /* ASR */
 #define ASR(Val)                                                \
@@ -920,8 +970,14 @@ static unsigned HaveIRQRequest;
     } while (0);
 
 /* ANE */
+/* An "unstable" illegal opcode that depends on a "constant" value that isn't
+ * really constant. It varies between machines, with temperature, and so on.
+ * Original sim65 behavior was to use the constant 0xEF here. To get behavior
+ * in line with the 65x02 testsuite, we now use the value 0xEE instead,
+ * which is also a reasonable choice that can be observed in practice.
+ */
 #define ANE(Val)                                                \
-    Val = (Regs.AC | 0xEF) & Regs.XR & Val;                     \
+    Val = (Regs.AC | 0xEE) & Regs.XR & Val;                     \
     Regs.AC = Val;                                              \
     TEST_SF (Val);                                              \
     TEST_ZF (Val)
@@ -977,36 +1033,128 @@ static unsigned HaveIRQRequest;
     TEST_SF (Val);                                              \
     TEST_ZF (Val)
 
-
-/* SBC */
-#define SBC(v)                                                  \
+/* SBC, binary mode (6502 and 65C02) */
+#define SBC_BINARY_MODE(v)                                      \
     do {                                                        \
-        unsigned r_a = Regs.AC;                                 \
-        unsigned src = (v) & 0xFF;                              \
-        unsigned ccc = (Regs.SR & CF) ^ CF;                     \
-        unsigned tmp = r_a - src - ccc;                         \
-                                                                \
-        SET_CF(tmp < 0x100);                                    \
-        TEST_SF(tmp);                                           \
-        TEST_ZF(tmp);                                           \
-        SET_OF((r_a ^ tmp) & (r_a ^ src) & 0x80);               \
-                                                                \
-        if (GET_DF ()) {                                        \
-            unsigned low = (r_a & 0x0f) - (src & 0x0f) - ccc;   \
-            tmp = (r_a & 0xf0) - (src & 0xf0);                  \
-            if (low & 0x10) {                                   \
-                low -= 6;                                       \
-                tmp -= 0x10;                                    \
-            }                                                   \
-            tmp = (low & 0xf) | tmp;                            \
-            if (tmp & 0x100) {                                  \
-                tmp -= 0x60;                                    \
-            }                                                   \
+        const uint8_t op = v;                                   \
+        const uint8_t OldAC = Regs.AC;                          \
+        const bool borrow = !GET_CF();                          \
+        Regs.AC = (OldAC - op - borrow);                        \
+        const bool NV = Regs.AC >= 0x80;                        \
+        SET_SF(NV);                                             \
+        SET_OF(((OldAC >= 0x80) ^ NV) & ((op < 0x80) ^ NV));    \
+        SET_ZF(Regs.AC == 0);                                   \
+        SET_CF(OldAC >= op + borrow);                           \
+    } while (0)
+
+/* SBC, decimal mode (6502 behavior) */
+#define SBC_DECIMAL_MODE_6502(v)                                \
+    do {                                                        \
+        const uint8_t op = v;                                   \
+        const uint8_t OldAC = Regs.AC;                          \
+        bool borrow = !GET_CF();                                \
+        const uint8_t binary_result = OldAC - op - borrow;      \
+        const bool NV = binary_result >= 0x80;                  \
+        uint8_t low_nibble = (OldAC & 15) - (op & 15) - borrow; \
+        if ((borrow = low_nibble >= 0x80))                      \
+            low_nibble = (low_nibble + 10) & 15;                \
+        uint8_t high_nibble = (OldAC >> 4) - (op >> 4) - borrow;\
+        if ((borrow = high_nibble >= 0x80))                     \
+            high_nibble = (high_nibble + 10) & 15;              \
+        Regs.AC = (high_nibble << 4) | low_nibble;              \
+        SET_SF(NV);                                             \
+        SET_OF(((OldAC >= 0x80) ^ NV) & ((op < 0x80) ^ NV));    \
+        SET_ZF(binary_result == 0);                             \
+        SET_CF(!borrow);                                        \
+    } while (0)
+
+/* SBC, decimal mode (65C02 behavior) */
+#define SBC_DECIMAL_MODE_65C02(v)                               \
+    do {                                                        \
+        const uint8_t op = v;                                   \
+        const uint8_t OldAC = Regs.AC;                          \
+        bool borrow = !GET_CF();                                \
+        uint8_t low_nibble = (OldAC & 15) - (op & 15) - borrow; \
+        if ((borrow = low_nibble >= 0x80))                      \
+            low_nibble += 10;                                   \
+        const bool low_nibble_still_negative =                  \
+            (low_nibble >= 0x80);                               \
+        low_nibble &= 15;                                       \
+        uint8_t high_nibble = (OldAC >> 4) - (op >> 4) - borrow;\
+        const bool PN = (high_nibble & 8) != 0;                 \
+        if ((borrow = high_nibble >= 0x80))                     \
+            high_nibble += 10;                                  \
+        high_nibble -= low_nibble_still_negative;               \
+        high_nibble &= 15;                                      \
+        Regs.AC = (high_nibble << 4) | low_nibble;              \
+        SET_SF(Regs.AC >= 0x80);                                \
+        SET_OF(((OldAC >= 0x80) ^ PN) & ((op < 0x80) ^ PN));    \
+        SET_ZF(Regs.AC == 0x00);                                \
+        SET_CF(!borrow);                                        \
+        ++Cycles;                                               \
+    } while (0)
+
+/* SBC, 6502 version */
+#define SBC_6502(v)                                             \
+    do {                                                        \
+        if (GET_DF()) {                                         \
+            SBC_DECIMAL_MODE_6502(v);                           \
+        } else {                                                \
+            SBC_BINARY_MODE(v);                                 \
         }                                                       \
-        Regs.AC = tmp & 0xFF;                                   \
+    } while (0)
+
+/* SBC, 65C02 version */
+#define SBC_65C02(v)                                            \
+    do {                                                        \
+        if (GET_DF()) {                                         \
+            SBC_DECIMAL_MODE_65C02(v);                          \
+        } else {                                                \
+            SBC_BINARY_MODE(v);                                 \
+        }                                                       \
     } while (0)
 
 
+
+/* Set/reset a specific bit in a zero-page byte. This macro
+ * macro is used to implement the 65C02 RMBx and SMBx instructions.
+ */
+#define ZP_BITOP(bitnr, bitval)                                 \
+    do {                                                        \
+        uint8_t zp_address = MemReadByte (Regs.PC + 1);         \
+        uint8_t zp_value = MemReadByte (zp_address);            \
+        if (bitval) {                                           \
+            zp_value |= (1 << bitnr);                           \
+        } else {                                                \
+            zp_value &= ~(1 << bitnr);                          \
+        }                                                       \
+        MemWriteByte (zp_address, zp_value);                    \
+        Regs.PC += 2;                                           \
+        Cycles = 5;                                             \
+    } while (0)
+
+/* Branch depending on the state of a specific bit of a zero page
+ * address. This macro is used to implement the 65C02 BBRx and
+ * BBSx instructions.
+ */
+#define ZP_BIT_BRANCH(bitnr, bitval)                            \
+    do {                                                        \
+        uint8_t zp_address = MemReadByte (Regs.PC + 1);         \
+        uint8_t zp_value = MemReadByte (zp_address);            \
+        int displacement = (int8_t)MemReadByte (Regs.PC + 2);   \
+        if (((zp_value & (1 << bitnr)) != 0) == bitval) {       \
+            Regs.PC += 3;                                       \
+            uint8_t OldPCH = PCH;                               \
+            Regs.PC += displacement;                            \
+            Cycles = 6;                                         \
+            if (PCH != OldPCH) {                                \
+                Cycles += 1;                                    \
+            }                                                   \
+        } else {                                                \
+            Regs.PC += 3;                                       \
+            Cycles = 5;                                         \
+        }                                                       \
+    } while (0)
 
 /*****************************************************************************/
 /*                         Opcode handling functions                         */
@@ -1100,6 +1248,14 @@ static void OPC_6502_07 (void)
 
 
 
+static void OPC_65C02_07 (void)
+/* Opcode $07: RMB0 zp */
+{
+    ZP_BITOP(0, 0);
+}
+
+
+
 static void OPC_6502_08 (void)
 /* Opcode $08: PHP */
 {
@@ -1179,6 +1335,14 @@ static void OPC_6502_0F (void)
 
 
 
+static void OPC_65C02_0F (void)
+/* Opcode $0F: BBR0 zp, rel */
+{
+    ZP_BIT_BRANCH (0, 0);
+}
+
+
+
 static void OPC_6502_10 (void)
 /* Opcode $10: BPL */
 {
@@ -1206,7 +1370,7 @@ static void OPC_65SC02_12 (void)
 static void OPC_6502_13 (void)
 /* Opcode $03: SLO (zp),y */
 {
-    ILLx2_OP (ZPINDY, SLO);
+    ILLx2_OP (ZPINDY_NP, SLO);
 }
 
 
@@ -1258,6 +1422,14 @@ static void OPC_6502_17 (void)
 
 
 
+static void OPC_65C02_17 (void)
+/* Opcode $17: RMB1 zp */
+{
+    ZP_BITOP(1, 0);
+}
+
+
+
 static void OPC_6502_18 (void)
 /* Opcode $18: CLC */
 {
@@ -1289,7 +1461,7 @@ static void OPC_65SC02_1A (void)
 static void OPC_6502_1B (void)
 /* Opcode $1B: SLO abs,y */
 {
-    ILLx2_OP (ABSY, SLO);
+    ILLx2_OP (ABSY_NP, SLO);
 }
 
 
@@ -1328,7 +1500,7 @@ static void OPC_6502_1D (void)
 static void OPC_6502_1E (void)
 /* Opcode $1E: ASL abs,x */
 {
-    MEM_OP (ABSX, ASL);
+    MEM_OP (ABSX_NP, ASL);
 }
 
 
@@ -1336,7 +1508,8 @@ static void OPC_6502_1E (void)
 static void OPC_65C02_1E (void)
 /* Opcode $1E: ASL abs,x */
 {
-    MEM_OP (ABSX_NP, ASL);
+    MEM_OP (ABSX, ASL);
+    --Cycles;
 }
 
 
@@ -1344,7 +1517,15 @@ static void OPC_65C02_1E (void)
 static void OPC_6502_1F (void)
 /* Opcode $1F: SLO abs,x */
 {
-    ILLx2_OP (ABSX, SLO);
+    ILLx2_OP (ABSX_NP, SLO);
+}
+
+
+
+static void OPC_65C02_1F (void)
+/* Opcode $1F: BBR1 zp, rel */
+{
+    ZP_BIT_BRANCH (1, 0);
 }
 
 
@@ -1352,13 +1533,37 @@ static void OPC_6502_1F (void)
 static void OPC_6502_20 (void)
 /* Opcode $20: JSR */
 {
-    unsigned Addr;
+    /* The obvious way to implement JSR for the 6502 is to (a) read the target address,
+     * and then (b) push the return address minus one. Or do (b) first, then (a).
+     *
+     * However, there is a non-obvious case where this conflicts with the actual order
+     * of operations that the 6502 does, which is:
+     *
+     * (a) Load the LSB of the target address.
+     * (b) Push the MSB of the return address, minus one.
+     * (c) Push the LSB of the return address, minus one.
+     * (d) Load the MSB of the target address.
+     *
+     * This can make a difference in a pretty esoteric case, if the JSR target is located,
+     * wholly or in part, inside the stack page (!). This won't happen in normal code
+     * but it can happen in specifically constructed examples.
+     *
+     * To deal with this, we load the LSB and MSB of the target address separately,
+     * with the pushing of the return address sandwiched in between, to mimic
+     * the order of the bus operations on a real 6502.
+     */
+
+    unsigned AddrLo, AddrHi;
+
     Cycles = 6;
-    Addr = MemReadWord (Regs.PC+1);
-    Regs.PC += 2;
+    Regs.PC += 1;
+    AddrLo = MemReadByte(Regs.PC);
+    Regs.PC += 1;
     PUSH (PCH);
     PUSH (PCL);
-    Regs.PC = Addr;
+    AddrHi = MemReadByte(Regs.PC);
+
+    Regs.PC = AddrLo + (AddrHi << 8);
 
     ParaVirtHooks (&Regs);
 }
@@ -1409,6 +1614,14 @@ static void OPC_6502_27 (void)
 /* Opcode $27: RLA zp */
 {
     ILLx2_OP (ZP, RLA);
+}
+
+
+
+static void OPC_65C02_27 (void)
+/* Opcode $27: RMB2 zp */
+{
+    ZP_BITOP(2, 0);
 }
 
 
@@ -1476,6 +1689,14 @@ static void OPC_6502_2F (void)
 
 
 
+static void OPC_65C02_2F (void)
+/* Opcode $2F: BBR2 zp, rel */
+{
+    ZP_BIT_BRANCH (2, 0);
+}
+
+
+
 static void OPC_6502_30 (void)
 /* Opcode $30: BMI */
 {
@@ -1503,7 +1724,7 @@ static void OPC_65SC02_32 (void)
 static void OPC_6502_33 (void)
 /* Opcode $33: RLA (zp),y */
 {
-    ILLx2_OP (ZPINDY, RLA);
+    ILLx2_OP (ZPINDY_NP, RLA);
 }
 
 
@@ -1540,6 +1761,14 @@ static void OPC_6502_37 (void)
 
 
 
+static void OPC_65C02_37 (void)
+/* Opcode $37: RMB3 zp */
+{
+    ZP_BITOP(3, 0);
+}
+
+
+
 static void OPC_6502_38 (void)
 /* Opcode $38: SEC */
 {
@@ -1571,7 +1800,7 @@ static void OPC_65SC02_3A (void)
 static void OPC_6502_3B (void)
 /* Opcode $3B: RLA abs,y */
 {
-    ILLx2_OP (ABSY, RLA);
+    ILLx2_OP (ABSY_NP, RLA);
 }
 
 
@@ -1595,7 +1824,7 @@ static void OPC_6502_3D (void)
 static void OPC_6502_3E (void)
 /* Opcode $3E: ROL abs,x */
 {
-    MEM_OP (ABSX, ROL);
+    MEM_OP (ABSX_NP, ROL);
 }
 
 
@@ -1603,15 +1832,24 @@ static void OPC_6502_3E (void)
 static void OPC_65C02_3E (void)
 /* Opcode $3E: ROL abs,x */
 {
-    MEM_OP (ABSX_NP, ROL);
+    MEM_OP (ABSX, ROL);
+    --Cycles;
 }
 
 
 
 static void OPC_6502_3F (void)
-/* Opcode $3B: RLA abs,x */
+/* Opcode $3F: RLA abs,x */
 {
-    ILLx2_OP (ABSX, RLA);
+    ILLx2_OP (ABSX_NP, RLA);
+}
+
+
+
+static void OPC_65C02_3F (void)
+/* Opcode $3F: BBR3 zp, rel */
+{
+    ZP_BIT_BRANCH (3, 0);
 }
 
 
@@ -1665,6 +1903,14 @@ static void OPC_6502_47 (void)
 /* Opcode $47: SRE zp */
 {
     ILLx2_OP (ZP, SRE);
+}
+
+
+
+static void OPC_65C02_47 (void)
+/* Opcode $47: RMB4 zp */
+{
+    ZP_BITOP(4, 0);
 }
 
 
@@ -1740,6 +1986,14 @@ static void OPC_6502_4F (void)
 
 
 
+static void OPC_65C02_4F (void)
+/* Opcode $4F: BBR4 zp, rel */
+{
+    ZP_BIT_BRANCH (4, 0);
+}
+
+
+
 static void OPC_6502_50 (void)
 /* Opcode $50: BVC */
 {
@@ -1767,7 +2021,7 @@ static void OPC_65SC02_52 (void)
 static void OPC_6502_53 (void)
 /* Opcode $43: SRE (zp),y */
 {
-    ILLx2_OP (ZPINDY, SRE);
+    ILLx2_OP (ZPINDY_NP, SRE);
 }
 
 
@@ -1792,6 +2046,14 @@ static void OPC_6502_57 (void)
 /* Opcode $57: SRE zp,x */
 {
     ILLx2_OP (ZPX, SRE);
+}
+
+
+
+static void OPC_65C02_57 (void)
+/* Opcode $57: RMB5 zp */
+{
+    ZP_BITOP(5, 0);
 }
 
 
@@ -1827,7 +2089,7 @@ static void OPC_65SC02_5A (void)
 static void OPC_6502_5B (void)
 /* Opcode $5B: SRE abs,y */
 {
-    ILLx2_OP (ABSY, SRE);
+    ILLx2_OP (ABSY_NP, SRE);
 }
 
 
@@ -1835,6 +2097,14 @@ static void OPC_6502_5B (void)
 static void OPC_65C02_5C (void)
 /* Opcode $5C: 'Absolute' 8 cycle NOP */
 {
+    /* This instruction takes 8 cycles, as per the following sources:
+     *
+     * - http://www.6502.org/tutorials/65c02opcodes.html
+     * - Tests on a WDC 65C02 in hardware.
+     *
+     * The 65x02 testsuite however claims that this instruction takes 4 cycles.
+     * See issue: https://github.com/SingleStepTests/65x02/issues/12
+     */
     Cycles = 8;
     Regs.PC += 3;
 }
@@ -1852,7 +2122,7 @@ static void OPC_6502_5D (void)
 static void OPC_6502_5E (void)
 /* Opcode $5E: LSR abs,x */
 {
-    MEM_OP (ABSX, LSR);
+    MEM_OP (ABSX_NP, LSR);
 }
 
 
@@ -1860,7 +2130,8 @@ static void OPC_6502_5E (void)
 static void OPC_65C02_5E (void)
 /* Opcode $5E: LSR abs,x */
 {
-    MEM_OP (ABSX_NP, LSR);
+    MEM_OP (ABSX, LSR);
+    --Cycles;
 }
 
 
@@ -1868,7 +2139,15 @@ static void OPC_65C02_5E (void)
 static void OPC_6502_5F (void)
 /* Opcode $5F: SRE abs,x */
 {
-    ILLx2_OP (ABSX, SRE);
+    ILLx2_OP (ABSX_NP, SRE);
+}
+
+
+
+static void OPC_65C02_5F (void)
+/* Opcode $5F: BBR5 zp, rel */
+{
+    ZP_BIT_BRANCH (5, 0);
 }
 
 
@@ -1887,10 +2166,16 @@ static void OPC_6502_60 (void)
 static void OPC_6502_61 (void)
 /* Opcode $61: ADC (zp,x) */
 {
-    ALU_OP (ZPXIND, ADC);
+    ALU_OP (ZPXIND, ADC_6502);
 }
 
 
+
+static void OPC_65C02_61 (void)
+/* Opcode $61: ADC (zp,x) */
+{
+    ALU_OP (ZPXIND, ADC_65C02);
+}
 
 static void OPC_6502_63 (void)
 /* Opcode $63: RRA (zp,x) */
@@ -1911,7 +2196,15 @@ static void OPC_65SC02_64 (void)
 static void OPC_6502_65 (void)
 /* Opcode $65: ADC zp */
 {
-    ALU_OP (ZP, ADC);
+    ALU_OP (ZP, ADC_6502);
+}
+
+
+
+static void OPC_65C02_65 (void)
+/* Opcode $65: ADC zp */
+{
+    ALU_OP (ZP, ADC_65C02);
 }
 
 
@@ -1932,6 +2225,14 @@ static void OPC_6502_67 (void)
 
 
 
+static void OPC_65C02_67 (void)
+/* Opcode $67: RMB6 zp */
+{
+    ZP_BITOP(6, 0);
+}
+
+
+
 static void OPC_6502_68 (void)
 /* Opcode $68: PLA */
 {
@@ -1947,10 +2248,16 @@ static void OPC_6502_68 (void)
 static void OPC_6502_69 (void)
 /* Opcode $69: ADC #imm */
 {
-    ALU_OP_IMM (ADC);
+    ALU_OP_IMM (ADC_6502);
 }
 
 
+
+static void OPC_65C02_69 (void)
+/* Opcode $69: ADC #imm */
+{
+    ALU_OP_IMM (ADC_65C02);
+}
 
 static void OPC_6502_6A (void)
 /* Opcode $6A: ROR a */
@@ -1998,8 +2305,8 @@ static void OPC_6502_6C (void)
 static void OPC_65C02_6C (void)
 /* Opcode $6C: JMP (ind) */
 {
-    /* 6502 bug fixed here */
-    Cycles = 5;
+    /* The 6502 bug is fixed on the 65C02, at the cost of an extra cycle. */
+    Cycles = 6;
     Regs.PC = MemReadWord (MemReadWord (Regs.PC+1));
 
     ParaVirtHooks (&Regs);
@@ -2010,7 +2317,15 @@ static void OPC_65C02_6C (void)
 static void OPC_6502_6D (void)
 /* Opcode $6D: ADC abs */
 {
-    ALU_OP (ABS, ADC);
+    ALU_OP (ABS, ADC_6502);
+}
+
+
+
+static void OPC_65C02_6D (void)
+/* Opcode $6D: ADC abs */
+{
+    ALU_OP (ABS, ADC_65C02);
 }
 
 
@@ -2031,6 +2346,14 @@ static void OPC_6502_6F (void)
 
 
 
+static void OPC_65C02_6F (void)
+/* Opcode $6F: BBR6 zp, rel */
+{
+    ZP_BIT_BRANCH (6, 0);
+}
+
+
+
 static void OPC_6502_70 (void)
 /* Opcode $70: BVS */
 {
@@ -2042,15 +2365,23 @@ static void OPC_6502_70 (void)
 static void OPC_6502_71 (void)
 /* Opcode $71: ADC (zp),y */
 {
-    ALU_OP (ZPINDY, ADC);
+    ALU_OP (ZPINDY, ADC_6502);
 }
 
 
 
-static void OPC_65SC02_72 (void)
+static void OPC_65C02_71 (void)
+/* Opcode $71: ADC (zp),y */
+{
+    ALU_OP (ZPINDY, ADC_65C02);
+}
+
+
+
+static void OPC_65C02_72 (void)
 /* Opcode $72: ADC (zp) */
 {
-    ALU_OP (ZPIND, ADC);
+    ALU_OP (ZPIND, ADC_65C02);
 }
 
 
@@ -2058,7 +2389,7 @@ static void OPC_65SC02_72 (void)
 static void OPC_6502_73 (void)
 /* Opcode $73: RRA (zp),y */
 {
-    ILLx2_OP (ZPINDY, RRA);
+    ILLx2_OP (ZPINDY_NP, RRA);
 }
 
 
@@ -2074,10 +2405,16 @@ static void OPC_65SC02_74 (void)
 static void OPC_6502_75 (void)
 /* Opcode $75: ADC zp,x */
 {
-    ALU_OP (ZPX, ADC);
+    ALU_OP (ZPX, ADC_6502);
 }
 
 
+
+static void OPC_65C02_75 (void)
+/* Opcode $75: ADC zp,x */
+{
+    ALU_OP (ZPX, ADC_65C02);
+}
 
 static void OPC_6502_76 (void)
 /* Opcode $76: ROR zp,x */
@@ -2095,6 +2432,14 @@ static void OPC_6502_77 (void)
 
 
 
+static void OPC_65C02_77 (void)
+/* Opcode $77: RMB7 zp */
+{
+    ZP_BITOP(7, 0);
+}
+
+
+
 static void OPC_6502_78 (void)
 /* Opcode $78: SEI */
 {
@@ -2108,7 +2453,15 @@ static void OPC_6502_78 (void)
 static void OPC_6502_79 (void)
 /* Opcode $79: ADC abs,y */
 {
-    ALU_OP (ABSY, ADC);
+    ALU_OP (ABSY, ADC_6502);
+}
+
+
+
+static void OPC_65C02_79 (void)
+/* Opcode $79: ADC abs,y */
+{
+    ALU_OP (ABSY, ADC_65C02);
 }
 
 
@@ -2128,7 +2481,7 @@ static void OPC_65SC02_7A (void)
 static void OPC_6502_7B (void)
 /* Opcode $7B: RRA abs,y */
 {
-    ILLx2_OP (ABSY, RRA);
+    ILLx2_OP (ABSY_NP, RRA);
 }
 
 
@@ -2150,7 +2503,15 @@ static void OPC_65SC02_7C (void)
 static void OPC_6502_7D (void)
 /* Opcode $7D: ADC abs,x */
 {
-    ALU_OP (ABSX, ADC);
+    ALU_OP (ABSX, ADC_6502);
+}
+
+
+
+static void OPC_65C02_7D (void)
+/* Opcode $7D: ADC abs,x */
+{
+    ALU_OP (ABSX, ADC_65C02);
 }
 
 
@@ -2158,7 +2519,7 @@ static void OPC_6502_7D (void)
 static void OPC_6502_7E (void)
 /* Opcode $7E: ROR abs,x */
 {
-    MEM_OP (ABSX, ROR);
+    MEM_OP (ABSX_NP, ROR);
 }
 
 
@@ -2166,7 +2527,8 @@ static void OPC_6502_7E (void)
 static void OPC_65C02_7E (void)
 /* Opcode $7E: ROR abs,x */
 {
-    MEM_OP (ABSX_NP, ROR);
+    MEM_OP (ABSX, ROR);
+    --Cycles;
 }
 
 
@@ -2174,7 +2536,15 @@ static void OPC_65C02_7E (void)
 static void OPC_6502_7F (void)
 /* Opcode $7F: RRA abs,x */
 {
-    ILLx2_OP (ABSX, RRA);
+    ILLx2_OP (ABSX_NP, RRA);
+}
+
+
+
+static void OPC_65C02_7F (void)
+/* Opcode $7F: BBR7 zp, rel */
+{
+    ZP_BIT_BRANCH (7, 0);
 }
 
 
@@ -2245,6 +2615,14 @@ static void OPC_6502_87 (void)
 /* Opcode $87: SAX zp */
 {
     STO_OP (ZP, Regs.AC & Regs.XR);
+}
+
+
+
+static void OPC_65C02_87 (void)
+/* Opcode $87: SMB0 zp */
+{
+    ZP_BITOP(0, 1);
 }
 
 
@@ -2321,6 +2699,14 @@ static void OPC_6502_8F (void)
 
 
 
+static void OPC_65C02_8F (void)
+/* Opcode $8F: BBS0 zp, rel */
+{
+    ZP_BIT_BRANCH (0, 1);
+}
+
+
+
 static void OPC_6502_90 (void)
 /* Opcode $90: BCC */
 {
@@ -2332,7 +2718,7 @@ static void OPC_6502_90 (void)
 static void OPC_6502_91 (void)
 /* Opcode $91: sta (zp),y */
 {
-    STO_OP (ZPINDY, Regs.AC);
+    STO_OP (ZPINDY_NP, Regs.AC);
 }
 
 
@@ -2348,7 +2734,20 @@ static void OPC_65SC02_92 (void)
 static void OPC_6502_93 (void)
 /* Opcode $93: SHA (zp),y */
 {
-    STO_CB (ZPINDY, SHA);
+    ++Regs.PC;
+    uint8_t zp_ptr_lo = MemReadByte(Regs.PC);
+    ++Regs.PC;
+    uint8_t zp_ptr_hi = zp_ptr_lo + 1;
+    uint8_t baselo = MemReadByte(zp_ptr_lo);
+    uint8_t basehi = MemReadByte(zp_ptr_hi);
+    uint8_t basehi_incremented = basehi + 1;
+    uint8_t write_value = Regs.AC & Regs.XR & basehi_incremented;
+    uint8_t write_address_lo = (baselo + Regs.YR);
+    bool pagecross = (baselo + Regs.YR) > 0xff;
+    uint8_t write_address_hi = pagecross ? write_value : basehi;
+    uint16_t write_address = write_address_lo + (write_address_hi << 8);
+    MemWriteByte(write_address, write_value);
+    Cycles=6;
 }
 
 
@@ -2385,6 +2784,14 @@ static void OPC_6502_97 (void)
 
 
 
+static void OPC_65C02_97 (void)
+/* Opcode $97: SMB1 zp */
+{
+    ZP_BITOP(1, 1);
+}
+
+
+
 static void OPC_6502_98 (void)
 /* Opcode $98: TYA */
 {
@@ -2400,7 +2807,7 @@ static void OPC_6502_98 (void)
 static void OPC_6502_99 (void)
 /* Opcode $99: STA abs,y */
 {
-    STO_OP (ABSY, Regs.AC);
+    STO_OP (ABSY_NP, Regs.AC);
 }
 
 
@@ -2418,7 +2825,20 @@ static void OPC_6502_9A (void)
 static void OPC_6502_9B (void)
 /* Opcode $9B: TAS abs,y */
 {
-    STO_CB (ABSY, TAS);
+    ++Regs.PC;
+    uint8_t baselo = MemReadByte(Regs.PC);
+    ++Regs.PC;
+    uint8_t basehi = MemReadByte(Regs.PC);
+    ++Regs.PC;
+    uint8_t basehi_incremented = basehi + 1;
+    uint8_t write_value = Regs.AC & Regs.XR & basehi_incremented;
+    uint8_t write_address_lo = (baselo + Regs.YR);
+    bool pagecross = (baselo + Regs.YR) > 0xff;
+    uint8_t write_address_hi = pagecross ? write_value : basehi;
+    uint16_t write_address = write_address_lo + (write_address_hi << 8);
+    MemWriteByte(write_address, write_value);
+    Regs.SP = Regs.AC & Regs.XR;
+    Cycles=5;
 }
 
 
@@ -2426,7 +2846,19 @@ static void OPC_6502_9B (void)
 static void OPC_6502_9C (void)
 /* Opcode $9D: SHY abs,x */
 {
-    STO_OP (ABSX, Regs.YR & ((address >> 8) + 1));
+    ++Regs.PC;
+    uint8_t baselo = MemReadByte(Regs.PC);
+    ++Regs.PC;
+    uint8_t basehi = MemReadByte(Regs.PC);
+    ++Regs.PC;
+    uint8_t basehi_incremented = basehi + 1;
+    uint8_t write_value = Regs.YR & basehi_incremented;
+    uint8_t write_address_lo = (baselo + Regs.XR);
+    bool pagecross = (baselo + Regs.XR) > 0xff;
+    uint8_t write_address_hi = pagecross ? write_value : basehi;
+    uint16_t write_address = write_address_lo + (write_address_hi << 8);
+    MemWriteByte(write_address, write_value);
+    Cycles=5;
 }
 
 
@@ -2442,7 +2874,7 @@ static void OPC_65SC02_9C (void)
 static void OPC_6502_9D (void)
 /* Opcode $9D: STA abs,x */
 {
-    STO_OP (ABSX, Regs.AC);
+    STO_OP (ABSX_NP, Regs.AC);
 }
 
 
@@ -2450,15 +2882,19 @@ static void OPC_6502_9D (void)
 static void OPC_6502_9E (void)
 /* Opcode $9E: SHX abs,x */
 {
-    STO_OP (ABSY, Regs.XR & ((address >> 8) + 1));
-}
-
-
-
-static void OPC_6502_9F (void)
-/* Opcode $9F: SHA abs,y */
-{
-    STO_CB (ABSY, SHA);
+    ++Regs.PC;
+    uint8_t baselo = MemReadByte(Regs.PC);
+    ++Regs.PC;
+    uint8_t basehi = MemReadByte(Regs.PC);
+    ++Regs.PC;
+    uint8_t basehi_incremented = basehi + 1;
+    uint8_t write_value = Regs.XR & basehi_incremented;
+    uint8_t write_address_lo = (baselo + Regs.YR);
+    bool pagecross = (baselo + Regs.YR) > 0xff;
+    uint8_t write_address_hi = pagecross ? write_value : basehi;
+    uint16_t write_address = write_address_lo + (write_address_hi << 8);
+    MemWriteByte(write_address, write_value);
+    Cycles=5;
 }
 
 
@@ -2466,7 +2902,35 @@ static void OPC_6502_9F (void)
 static void OPC_65SC02_9E (void)
 /* Opcode $9E: STZ abs,x */
 {
-    STO_OP (ABSX, 0);
+    STO_OP (ABSX_NP, 0);
+}
+
+
+
+static void OPC_6502_9F (void)
+/* Opcode $9F: SHA abs,y */
+{
+    ++Regs.PC;
+    uint8_t baselo = MemReadByte(Regs.PC);
+    ++Regs.PC;
+    uint8_t basehi = MemReadByte(Regs.PC);
+    ++Regs.PC;
+    uint8_t basehi_incremented = basehi + 1;
+    uint8_t write_value = Regs.AC & Regs.XR & basehi_incremented;
+    uint8_t write_address_lo = (baselo + Regs.YR);
+    bool pagecross = (baselo + Regs.YR) > 0xff;
+    uint8_t write_address_hi = pagecross ? write_value : basehi;
+    uint16_t write_address = write_address_lo + (write_address_hi << 8);
+    MemWriteByte(write_address, write_value);
+    Cycles=5;
+}
+
+
+
+static void OPC_65C02_9F (void)
+/* Opcode $9F: BBS1 zp, rel */
+{
+    ZP_BIT_BRANCH (1, 1);
 }
 
 
@@ -2531,6 +2995,14 @@ static void OPC_6502_A7 (void)
 /* Opcode $A7: LAX zp */
 {
     ALU_OP (ZP, LAX);
+}
+
+
+
+static void OPC_65C02_A7 (void)
+/* Opcode $A7: SMB2 zp */
+{
+    ZP_BITOP(2, 1);
 }
 
 
@@ -2607,6 +3079,14 @@ static void OPC_6502_AF (void)
 
 
 
+static void OPC_65C02_AF (void)
+/* Opcode $AF: BBS2 zp, rel */
+{
+    ZP_BIT_BRANCH (2, 1);
+}
+
+
+
 static void OPC_6502_B0 (void)
 /* Opcode $B0: BCS */
 {
@@ -2667,6 +3147,14 @@ static void OPC_6502_B7 (void)
 /* Opcode $B7: LAX zp,y */
 {
     ALU_OP (ZPY, LAX);
+}
+
+
+
+static void OPC_65C02_B7 (void)
+/* Opcode $B7: SMB3 zp */
+{
+    ZP_BITOP(3, 1);
 }
 
 
@@ -2741,6 +3229,14 @@ static void OPC_6502_BF (void)
 
 
 
+static void OPC_65C02_BF (void)
+/* Opcode $BF: BBS3 zp, rel */
+{
+    ZP_BIT_BRANCH (3, 1);
+}
+
+
+
 static void OPC_6502_C0 (void)
 /* Opcode $C0: CPY #imm */
 {
@@ -2793,6 +3289,14 @@ static void OPC_6502_C7 (void)
 /* Opcode $C7: DCP zp */
 {
     MEM_OP (ZP, DCP);
+}
+
+
+
+static void OPC_65C02_C7 (void)
+/* Opcode $C7: SMB4 zp */
+{
+    ZP_BITOP(4, 1);
 }
 
 
@@ -2865,6 +3369,14 @@ static void OPC_6502_CF (void)
 
 
 
+static void OPC_65C02_CF (void)
+/* Opcode $CF: BBS4 zp, rel */
+{
+    ZP_BIT_BRANCH (4, 1);
+}
+
+
+
 static void OPC_6502_D0 (void)
 /* Opcode $D0: BNE */
 {
@@ -2892,7 +3404,7 @@ static void OPC_65SC02_D2 (void)
 static void OPC_6502_D3 (void)
 /* Opcode $D3: DCP (zp),y */
 {
-    MEM_OP (ZPINDY, DCP);
+    MEM_OP (ZPINDY_NP, DCP);
 }
 
 
@@ -2917,6 +3429,14 @@ static void OPC_6502_D7 (void)
 /* Opcode $D7: DCP zp,x */
 {
     MEM_OP (ZPX, DCP);
+}
+
+
+
+static void OPC_65C02_D7 (void)
+/* Opcode $D7: SMB5 zp */
+{
+    ZP_BITOP(5, 1);
 }
 
 
@@ -2952,7 +3472,7 @@ static void OPC_65SC02_DA (void)
 static void OPC_6502_DB (void)
 /* Opcode $DB: DCP abs,y */
 {
-    MEM_OP (ABSY, DCP);
+    MEM_OP (ABSY_NP, DCP);
 }
 
 
@@ -2968,7 +3488,7 @@ static void OPC_6502_DD (void)
 static void OPC_6502_DE (void)
 /* Opcode $DE: DEC abs,x */
 {
-    MEM_OP (ABSX, DEC);
+    MEM_OP (ABSX_NP, DEC);
 }
 
 
@@ -2976,7 +3496,15 @@ static void OPC_6502_DE (void)
 static void OPC_6502_DF (void)
 /* Opcode $DF: DCP abs,x */
 {
-    MEM_OP (ABSX, DCP);
+    MEM_OP (ABSX_NP, DCP);
+}
+
+
+
+static void OPC_65C02_DF (void)
+/* Opcode $DF: BBS5 zp, rel */
+{
+    ZP_BIT_BRANCH (5, 1);
 }
 
 
@@ -2992,10 +3520,16 @@ static void OPC_6502_E0 (void)
 static void OPC_6502_E1 (void)
 /* Opcode $E1: SBC (zp,x) */
 {
-    ALU_OP (ZPXIND, SBC);
+    ALU_OP (ZPXIND, SBC_6502);
 }
 
 
+
+static void OPC_65C02_E1 (void)
+/* Opcode $E1: SBC (zp,x) */
+{
+    ALU_OP (ZPXIND, SBC_65C02);
+}
 
 static void OPC_6502_E3 (void)
 /* Opcode $E3: ISC (zp,x) */
@@ -3016,7 +3550,15 @@ static void OPC_6502_E4 (void)
 static void OPC_6502_E5 (void)
 /* Opcode $E5: SBC zp */
 {
-    ALU_OP (ZP, SBC);
+    ALU_OP (ZP, SBC_6502);
+}
+
+
+
+static void OPC_65C02_E5 (void)
+/* Opcode $E5: SBC zp */
+{
+    ALU_OP (ZP, SBC_65C02);
 }
 
 
@@ -3037,6 +3579,14 @@ static void OPC_6502_E7 (void)
 
 
 
+static void OPC_65C02_E7 (void)
+/* Opcode $E7: SMB6 zp */
+{
+    ZP_BITOP(6, 1);
+}
+
+
+
 static void OPC_6502_E8 (void)
 /* Opcode $E8: INX */
 {
@@ -3047,16 +3597,22 @@ static void OPC_6502_E8 (void)
 
 
 
-/* Aliases of opcode $EA */
+/* Aliases of opcode $E9 */
 #define OPC_6502_EB OPC_6502_E9
 
 static void OPC_6502_E9 (void)
 /* Opcode $E9: SBC #imm */
 {
-    ALU_OP_IMM (SBC);
+    ALU_OP_IMM (SBC_6502);
 }
 
 
+
+static void OPC_65C02_E9 (void)
+/* Opcode $E9: SBC #imm */
+{
+    ALU_OP_IMM (SBC_65C02);
+}
 
 /* Aliases of opcode $EA */
 #define OPC_6502_1A OPC_6502_EA
@@ -3123,7 +3679,15 @@ static void OPC_6502_EC (void)
 static void OPC_6502_ED (void)
 /* Opcode $ED: SBC abs */
 {
-    ALU_OP (ABS, SBC);
+    ALU_OP (ABS, SBC_6502);
+}
+
+
+
+static void OPC_65C02_ED (void)
+/* Opcode $ED: SBC abs */
+{
+    ALU_OP (ABS, SBC_65C02);
 }
 
 
@@ -3143,6 +3707,14 @@ static void OPC_6502_EF (void)
 
 
 
+static void OPC_65C02_EF (void)
+/* Opcode $EF: BBS6 zp, rel */
+{
+    ZP_BIT_BRANCH (6, 1);
+}
+
+
+
 static void OPC_6502_F0 (void)
 /* Opcode $F0: BEQ */
 {
@@ -3154,15 +3726,24 @@ static void OPC_6502_F0 (void)
 static void OPC_6502_F1 (void)
 /* Opcode $F1: SBC (zp),y */
 {
-    ALU_OP (ZPINDY, SBC);
+    ALU_OP (ZPINDY, SBC_6502);
 }
 
 
 
-static void OPC_65SC02_F2 (void)
+
+static void OPC_65C02_F1 (void)
+/* Opcode $F1: SBC (zp),y */
+{
+    ALU_OP (ZPINDY, SBC_65C02);
+}
+
+
+
+static void OPC_65C02_F2 (void)
 /* Opcode $F2: SBC (zp) */
 {
-    ALU_OP (ZPIND, SBC);
+    ALU_OP (ZPIND, SBC_65C02);
 }
 
 
@@ -3170,7 +3751,7 @@ static void OPC_65SC02_F2 (void)
 static void OPC_6502_F3 (void)
 /* Opcode $F3: ISC (zp),y */
 {
-    MEM_OP (ZPINDY, ISC);
+    MEM_OP (ZPINDY_NP, ISC);
 }
 
 
@@ -3178,7 +3759,15 @@ static void OPC_6502_F3 (void)
 static void OPC_6502_F5 (void)
 /* Opcode $F5: SBC zp,x */
 {
-    ALU_OP (ZPX, SBC);
+    ALU_OP (ZPX, SBC_6502);
+}
+
+
+
+static void OPC_65C02_F5 (void)
+/* Opcode $F5: SBC zp,x */
+{
+    ALU_OP (ZPX, SBC_65C02);
 }
 
 
@@ -3199,6 +3788,14 @@ static void OPC_6502_F7 (void)
 
 
 
+static void OPC_65C02_F7 (void)
+/* Opcode $F7: SMB7 zp */
+{
+    ZP_BITOP(7, 1);
+}
+
+
+
 static void OPC_6502_F8 (void)
 /* Opcode $F8: SED */
 {
@@ -3212,7 +3809,15 @@ static void OPC_6502_F8 (void)
 static void OPC_6502_F9 (void)
 /* Opcode $F9: SBC abs,y */
 {
-    ALU_OP (ABSY, SBC);
+    ALU_OP (ABSY, SBC_6502);
+}
+
+
+
+static void OPC_65C02_F9 (void)
+/* Opcode $F9: SBC abs,y */
+{
+    ALU_OP (ABSY, SBC_65C02);
 }
 
 
@@ -3232,7 +3837,7 @@ static void OPC_65SC02_FA (void)
 static void OPC_6502_FB (void)
 /* Opcode $FB: ISC abs,y */
 {
-    MEM_OP (ABSY, ISC);
+    MEM_OP (ABSY_NP, ISC);
 }
 
 
@@ -3240,7 +3845,15 @@ static void OPC_6502_FB (void)
 static void OPC_6502_FD (void)
 /* Opcode $FD: SBC abs,x */
 {
-    ALU_OP (ABSX, SBC);
+    ALU_OP (ABSX, SBC_6502);
+}
+
+
+
+static void OPC_65C02_FD (void)
+/* Opcode $FD: SBC abs,x */
+{
+    ALU_OP (ABSX, SBC_65C02);
 }
 
 
@@ -3248,7 +3861,7 @@ static void OPC_6502_FD (void)
 static void OPC_6502_FE (void)
 /* Opcode $FE: INC abs,x */
 {
-    MEM_OP (ABSX, INC);
+    MEM_OP (ABSX_NP, INC);
 }
 
 
@@ -3256,7 +3869,15 @@ static void OPC_6502_FE (void)
 static void OPC_6502_FF (void)
 /* Opcode $FF: ISC abs,x */
 {
-    MEM_OP (ABSX, ISC);
+    MEM_OP (ABSX_NP, ISC);
+}
+
+
+
+static void OPC_65C02_FF (void)
+/* Opcode $FF: BBS7 zp, rel */
+{
+    ZP_BIT_BRANCH (7, 1);
 }
 
 
@@ -3800,7 +4421,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65SC02_04,
     OPC_6502_05,
     OPC_6502_06,
-    OPC_Illegal,        // $07: RMB0 currently unsupported
+    OPC_65C02_07,
     OPC_6502_08,
     OPC_6502_09,
     OPC_6502_0A,
@@ -3808,7 +4429,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65SC02_0C,
     OPC_6502_0D,
     OPC_6502_0E,
-    OPC_Illegal,        // $0F: BBR0 currently unsupported
+    OPC_65C02_0F,
     OPC_6502_10,
     OPC_6502_11,
     OPC_65SC02_12,
@@ -3816,7 +4437,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65SC02_14,
     OPC_6502_15,
     OPC_6502_16,
-    OPC_Illegal,        // $17: RMB1 currently unsupported
+    OPC_65C02_17,
     OPC_6502_18,
     OPC_6502_19,
     OPC_65SC02_1A,
@@ -3824,7 +4445,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65SC02_1C,
     OPC_6502_1D,
     OPC_65C02_1E,
-    OPC_Illegal,        // $1F: BBR1 currently unsupported
+    OPC_65C02_1F,
     OPC_6502_20,
     OPC_6502_21,
     OPC_65C02_NOP22,    // $22
@@ -3832,7 +4453,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_24,
     OPC_6502_25,
     OPC_6502_26,
-    OPC_Illegal,        // $27: RMB2 currently unsupported
+    OPC_65C02_27,
     OPC_6502_28,
     OPC_6502_29,
     OPC_6502_2A,
@@ -3840,7 +4461,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_2C,
     OPC_6502_2D,
     OPC_6502_2E,
-    OPC_Illegal,        // $2F: BBR2 currently unsupported
+    OPC_65C02_2F,
     OPC_6502_30,
     OPC_6502_31,
     OPC_65SC02_32,
@@ -3848,7 +4469,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65SC02_34,
     OPC_6502_35,
     OPC_6502_36,
-    OPC_Illegal,        // $37: RMB3 currently unsupported
+    OPC_65C02_37,
     OPC_6502_38,
     OPC_6502_39,
     OPC_65SC02_3A,
@@ -3856,7 +4477,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65SC02_3C,
     OPC_6502_3D,
     OPC_65C02_3E,
-    OPC_Illegal,        // $3F: BBR3 currently unsupported
+    OPC_65C02_3F,
     OPC_6502_40,
     OPC_6502_41,
     OPC_65C02_NOP22,    // $42
@@ -3864,7 +4485,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_44,        // $44
     OPC_6502_45,
     OPC_6502_46,
-    OPC_Illegal,        // $47: RMB4 currently unsupported
+    OPC_65C02_47,
     OPC_6502_48,
     OPC_6502_49,
     OPC_6502_4A,
@@ -3872,7 +4493,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_4C,
     OPC_6502_4D,
     OPC_6502_4E,
-    OPC_Illegal,        // $4F: BBR4 currently unsupported
+    OPC_65C02_4F,
     OPC_6502_50,
     OPC_6502_51,
     OPC_65SC02_52,
@@ -3880,7 +4501,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65C02_NOP24,    // $54
     OPC_6502_55,
     OPC_6502_56,
-    OPC_Illegal,        // $57: RMB5 currently unsupported
+    OPC_65C02_57,
     OPC_6502_58,
     OPC_6502_59,
     OPC_65SC02_5A,
@@ -3888,39 +4509,39 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65C02_5C,
     OPC_6502_5D,
     OPC_65C02_5E,
-    OPC_Illegal,        // $5F: BBR5 currently unsupported
+    OPC_65C02_5F,
     OPC_6502_60,
-    OPC_6502_61,
+    OPC_65C02_61,
     OPC_65C02_NOP22,    // $62
     OPC_65C02_NOP11,    // $63
     OPC_65SC02_64,
-    OPC_6502_65,
+    OPC_65C02_65,
     OPC_6502_66,
-    OPC_Illegal,        // $67: RMB6 currently unsupported
+    OPC_65C02_67,
     OPC_6502_68,
-    OPC_6502_69,
+    OPC_65C02_69,
     OPC_6502_6A,
     OPC_65C02_NOP11,    // $6B
     OPC_65C02_6C,
-    OPC_6502_6D,
+    OPC_65C02_6D,
     OPC_6502_6E,
-    OPC_Illegal,        // $6F: BBR6 currently unsupported
+    OPC_65C02_6F,
     OPC_6502_70,
-    OPC_6502_71,
-    OPC_65SC02_72,
+    OPC_65C02_71,
+    OPC_65C02_72,
     OPC_65C02_NOP11,    // $73
     OPC_65SC02_74,
-    OPC_6502_75,
+    OPC_65C02_75,
     OPC_6502_76,
-    OPC_Illegal,        // $77: RMB7 currently unsupported
+    OPC_65C02_77,
     OPC_6502_78,
-    OPC_6502_79,
+    OPC_65C02_79,
     OPC_65SC02_7A,
     OPC_65C02_NOP11,    // $7B
     OPC_65SC02_7C,
-    OPC_6502_7D,
+    OPC_65C02_7D,
     OPC_65C02_7E,
-    OPC_Illegal,        // $7F: BBR7 currently unsupported
+    OPC_65C02_7F,
     OPC_65SC02_80,
     OPC_6502_81,
     OPC_65C02_NOP22,    // $82
@@ -3928,7 +4549,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_84,
     OPC_6502_85,
     OPC_6502_86,
-    OPC_Illegal,        // $87: SMB0 currently unsupported
+    OPC_65C02_87,
     OPC_6502_88,
     OPC_65SC02_89,
     OPC_6502_8A,
@@ -3936,7 +4557,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_8C,
     OPC_6502_8D,
     OPC_6502_8E,
-    OPC_Illegal,        // $8F: BBS0 currently unsupported
+    OPC_65C02_8F,
     OPC_6502_90,
     OPC_6502_91,
     OPC_65SC02_92,
@@ -3944,7 +4565,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_94,
     OPC_6502_95,
     OPC_6502_96,
-    OPC_Illegal,        // $97: SMB1 currently unsupported
+    OPC_65C02_97,
     OPC_6502_98,
     OPC_6502_99,
     OPC_6502_9A,
@@ -3952,7 +4573,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65SC02_9C,
     OPC_6502_9D,
     OPC_65SC02_9E,
-    OPC_Illegal,        // $9F: BBS1 currently unsupported
+    OPC_65C02_9F,
     OPC_6502_A0,
     OPC_6502_A1,
     OPC_6502_A2,
@@ -3960,7 +4581,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_A4,
     OPC_6502_A5,
     OPC_6502_A6,
-    OPC_Illegal,        // $A7: SMB2 currently unsupported
+    OPC_65C02_A7,
     OPC_6502_A8,
     OPC_6502_A9,
     OPC_6502_AA,
@@ -3968,7 +4589,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_AC,
     OPC_6502_AD,
     OPC_6502_AE,
-    OPC_Illegal,        // $AF: BBS2 currently unsupported
+    OPC_65C02_AF,
     OPC_6502_B0,
     OPC_6502_B1,
     OPC_65SC02_B2,
@@ -3976,7 +4597,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_B4,
     OPC_6502_B5,
     OPC_6502_B6,
-    OPC_Illegal,        // $B7: SMB3 currently unsupported
+    OPC_65C02_B7,
     OPC_6502_B8,
     OPC_6502_B9,
     OPC_6502_BA,
@@ -3984,7 +4605,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_BC,
     OPC_6502_BD,
     OPC_6502_BE,
-    OPC_Illegal,        // $BF: BBS3 currently unsupported
+    OPC_65C02_BF,
     OPC_6502_C0,
     OPC_6502_C1,
     OPC_65C02_NOP22,    // $C2
@@ -3992,7 +4613,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_C4,
     OPC_6502_C5,
     OPC_6502_C6,
-    OPC_Illegal,        // $C7: SMB4 currently unsupported
+    OPC_65C02_C7,
     OPC_6502_C8,
     OPC_6502_C9,
     OPC_6502_CA,
@@ -4000,7 +4621,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_6502_CC,
     OPC_6502_CD,
     OPC_6502_CE,
-    OPC_Illegal,        // $CF: BBS4 currently unsupported
+    OPC_65C02_CF,
     OPC_6502_D0,
     OPC_6502_D1,
     OPC_65SC02_D2,
@@ -4008,7 +4629,7 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65C02_NOP24,    // $D4
     OPC_6502_D5,
     OPC_6502_D6,
-    OPC_Illegal,        // $D7: SMB5 currently unsupported
+    OPC_65C02_D7,
     OPC_6502_D8,
     OPC_6502_D9,
     OPC_65SC02_DA,
@@ -4016,39 +4637,39 @@ static const OPFunc OP65C02Table[256] = {
     OPC_65C02_NOP34,    // $DC
     OPC_6502_DD,
     OPC_6502_DE,
-    OPC_Illegal,        // $DF: BBS5 currently unsupported
+    OPC_65C02_DF,
     OPC_6502_E0,
-    OPC_6502_E1,
+    OPC_65C02_E1,
     OPC_65C02_NOP22,    // $E2
     OPC_65C02_NOP11,    // $E3
     OPC_6502_E4,
-    OPC_6502_E5,
+    OPC_65C02_E5,
     OPC_6502_E6,
-    OPC_Illegal,        // $E7: SMB6 currently unsupported
+    OPC_65C02_E7,
     OPC_6502_E8,
-    OPC_6502_E9,
+    OPC_65C02_E9,
     OPC_6502_EA,
     OPC_65C02_NOP11,    // $EB
     OPC_6502_EC,
-    OPC_6502_ED,
+    OPC_65C02_ED,
     OPC_6502_EE,
-    OPC_Illegal,        // $EF: BBS6 currently unsupported
+    OPC_65C02_EF,
     OPC_6502_F0,
-    OPC_6502_F1,
-    OPC_65SC02_F2,
+    OPC_65C02_F1,
+    OPC_65C02_F2,
     OPC_65C02_NOP11,    // $F3
     OPC_65C02_NOP24,    // $F4
-    OPC_6502_F5,
+    OPC_65C02_F5,
     OPC_6502_F6,
-    OPC_Illegal,        // $F7: SMB7 currently unsupported
+    OPC_65C02_F7,
     OPC_6502_F8,
-    OPC_6502_F9,
+    OPC_65C02_F9,
     OPC_65SC02_FA,
     OPC_65C02_NOP11,    // $FB
     OPC_65C02_NOP34,    // $FC
-    OPC_6502_FD,
+    OPC_65C02_FD,
     OPC_6502_FE,
-    OPC_Illegal,        // $FF: BBS7 currently unsupported
+    OPC_65C02_FF
 };
 
 
