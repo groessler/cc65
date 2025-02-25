@@ -179,11 +179,12 @@ loc_size:       .res    1
 
         ldy     #1
         lda     #':'
+findcolon:
         cmp     (ptr4),y        ; "X:"
-        beq     colon1
-        iny
-        cmp     (ptr4),y        ; "Xn:"
         beq     colon2
+        iny
+        cpy     tmp3
+        bne     findcolon
 
         ; no colon there!? OK, then we use a fresh iocb....
         ; return error here? no, the subsequent open call should fail
@@ -250,7 +251,11 @@ noslot1:bcs     noslot                  ; no one available (noslot1: helper labe
 ; string in "Xn:xxx" format
 colon2: dey
         lda     (ptr4),y        ; get device number
-        sec
+        cmp     #'9'+1
+        bcs     colon1
+        cmp     #'0'
+        bcc     colon1
+;        sec
         sbc     #'0'
         and     #7
         sta     loc_devnum
@@ -263,7 +268,8 @@ colon2: dey
 ; string in "X:xxx" format
 colon1: lda     #3              ; max. length if device only ("X:")
         cmp     tmp3
-        bcc     do_open_nd      ; string is longer -> contains filename
+        bcs     check_dev
+        jmp     do_open_nd      ; string is longer -> contains filename
 
 ; get device and search it in fd table
 check_dev:
