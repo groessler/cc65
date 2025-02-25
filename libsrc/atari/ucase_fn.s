@@ -45,12 +45,13 @@
         ; bit #0 of tmp2 is used as an additional flag whether device name is present in passed string (1 = present, 0 = not present)
         ldy     #1
         inc     tmp2            ; initialize flag: device present
-        lda     #':'
-        cmp     (ptr4),y
+findcolon:
+        lda     (ptr4),y        ; "X:"
+        cmp     #':'
         beq     hasdev
         iny
-        cmp     (ptr4),y
-        beq     hasdev
+        cmp     #0              ; end of string
+        bne     findcolon
         dec     tmp2            ; set flag: no device in passed string
 hasdev:
 .endif
