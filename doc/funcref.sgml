@@ -103,6 +103,8 @@ function.
 <item><ref id="gmtime_dt" name="gmtime_dt">
 <item><ref id="mktime_dt" name="mktime_dt">
 <item>rebootafterexit
+<item><ref id="videomode" name="videomode">
+<item><ref id="waitvsync" name="waitvsync">
 </itemize>
 
 
@@ -118,6 +120,7 @@ function.
 <item><ref id="mktime_dt" name="mktime_dt">
 <item>rebootafterexit
 <item><ref id="videomode" name="videomode">
+<item><ref id="waitvsync" name="waitvsync">
 </itemize>
 
 
@@ -521,6 +524,14 @@ see also <tt>testcode/lib/em-test.c</tt> and <tt>samples/multidemo.c</tt>.
 </itemize>
 
 
+<sect1><tt/lzsa.h/<label id="lzsa.h"><p>
+
+<itemize>
+<item><ref id="decompress_lzsa1" name="decompress_lzsa1">
+<item><ref id="decompress_lzsa2" name="decompress_lzsa2">
+</itemize>
+
+
 <sect1><tt/modload.h/<label id="modload.h"><p>
 
 <itemize>
@@ -891,6 +902,13 @@ communication, see also <tt>testcode/lib/ser-test.c</tt>.
 <!-- </itemize> -->
 
 (incomplete)
+
+
+<sect1><tt/zx02.h/<label id="zx02.h"><p>
+
+<itemize>
+<item><ref id="decompress_zx02" name="decompress_zx02">
+</itemize>
 
 
 <sect>Alphabetical function reference<p>
@@ -3381,6 +3399,70 @@ used in presence of a prototype.
 <tag/Description/<tt/decompress_lz4/ uncompresses a LZ4-compressed buffer.
 <tag/Notes/<itemize>
 <item>Use LZ4_compress_HC with compression level 16 for best compression.
+<item>Your program will need to know the uncompressed size of the buffer as
+there is no end-of-stream marker.
+<item>LZ4 is the biggest and second-slowest decompressor shipped in cc65 runtime.
+It is also the least efficient compression algorithm.
+</itemize>
+<tag/Availability/cc65
+<tag/Example/None.
+</descrip>
+</quote>
+
+
+<sect1>decompress_lzsa1<label id="decompress_lzsa1"><p>
+
+<quote>
+<descrip>
+<tag/Function/Uncompress a LZSA buffer with format 1.
+<tag/Header/<tt/<ref id="lzsa.h" name="lzsa.h">/
+<tag/Declaration/<tt/void decompress_lzsa1 (const unsigned char* src, unsigned char* const dst);/
+<tag/Description/<tt/decompress_lz4/ uncompresses a LZSA buffer with format 1.
+<tag/Notes/<itemize>
+<item>Use <tt/lzsa -f 1 -r input.bin output.lzsa1/ to compress your input.
+<item>The project and compressor can be found at <url url="https://github.com/emmanuel-marty/lzsa">
+<item>LZSA1 is the fastest decompressor shipped in cc65 runtime, but data is less
+compressed than with LZSA2 and ZX02.
+</itemize>
+<tag/Availability/cc65
+<tag/Example/None.
+</descrip>
+</quote>
+
+
+<sect1>decompress_lzsa2<label id="decompress_lzsa2"><p>
+
+<quote>
+<descrip>
+<tag/Function/Uncompress a LZSA buffer with format 2.
+<tag/Header/<tt/<ref id="lzsa.h" name="lzsa.h">/
+<tag/Declaration/<tt/void decompress_lzsa2 (const unsigned char* src, unsigned char* const dst);/
+<tag/Description/<tt/decompress_lz4/ uncompresses a LZSA buffer with format 2.
+<tag/Notes/<itemize>
+<item>Use <tt/lzsa -f 2 -r input.bin output.lzsa2/ to compress your input.
+<item>The project and compressor can be found at <url url="https://github.com/emmanuel-marty/lzsa">
+<item>LZSA2 is the second fastest decompressor shipped in cc65 runtime, but data is less
+compressed than with ZX02.
+</itemize>
+<tag/Availability/cc65
+<tag/Example/None.
+</descrip>
+</quote>
+
+
+<sect1>decompress_zx02<label id="decompress_zx02"><p>
+
+<quote>
+<descrip>
+<tag/Function/Uncompress a ZX02 buffer.
+<tag/Header/<tt/<ref id="zx02.h" name="zx02.h">/
+<tag/Declaration/<tt/void decompress_zx02 (const unsigned char* src, unsigned char* const dst);/
+<tag/Description/<tt/decompress_zx02/ uncompresses a ZX02 buffer with format 2.
+<tag/Notes/<itemize>
+<item>Use <tt/zx02 input.bin output.zx02/ to compress your input.
+<item>The project and compressor can be found at <url url="https://github.com/dmsc/zx02">
+<item>ZX02 is the slowest decompressor shipped with cc65 runtime, but is also the
+smallest and has the best compression ratio.
 </itemize>
 <tag/Availability/cc65
 <tag/Example/None.
@@ -8398,24 +8480,27 @@ used in presence of a prototype.
 <tag/Function/Switch to either 40- or 80-column text mode, or a standard
 graphics mode.
 <tag/Header/<tt/
+<ref id="apple2.h" name="apple2.h">,
 <ref id="apple2enh.h" name="apple2enh.h">,
 <ref id="c128.h" name="c128.h">,
 <ref id="cx16.h" name="cx16.h">/
 <tag/Declaration/
-<tt>unsigned __fastcall__ videomode (unsigned Mode); /* for apple2enh and c128 */</tt><newline>
-<tt>signed char __fastcall__ videomode (signed char Mode); /* for cx16 */</tt>
+<tt>unsigned __fastcall__ videomode (unsigned Mode); /* for c128 */</tt><newline>
+<tt>signed char __fastcall__ videomode (signed char Mode); /* for apple2 and cx16 */</tt>
 <tag/Description/Switch to a 40- or 80-column text or graphics mode, depending
 on the argument. If the requested mode is already active, nothing happens. The
 old mode is returned from the call.
 <tag/Notes/<itemize>
-<item>The function is specific to the Commodore 128, the enhanced Apple //e,
+<item>The function is specific to the Commodore 128, the Apple II,
 and the Commander X16.
 <item>This function replaces <ref id="toggle_videomode"
 name="toggle_videomode">.
 <item>The function is available as only a fastcall function, so it may be used
 only in the presence of a prototype.
+<item>On Apple II, this functions returns the previously active video mode, or -1
+if the mode is not supported due to lack of hardware.
 </itemize>
-<tag/Availability/C128, enhanced Apple //e, and CX16
+<tag/Availability/C128, Apple II, and CX16
 <tag/See also/
 <ref id="fast" name="fast">,
 <ref id="isfast" name="isfast">,
@@ -8433,14 +8518,19 @@ only in the presence of a prototype.
 <descrip>
 <tag/Function/Wait until the start of the next video frame.
 <tag/Header/<tt/
-<ref id="apple2enh.h" name="apple2enh.h">,
+<ref id="apple2.h" name="apple2.h">,
 <ref id="atmos.h" name="atmos.h">,
 <ref id="cbm.h" name="cbm.h">,
 <ref id="gamate.h" name="gamate.h">,
 <ref id="nes.h" name="nes.h">,
 <ref id="pce.h" name="pce.h">/
-<tag/Declaration/<tt/void waitvsync (void);/
+<tag/Declaration/
+<tt>void waitvsync (void);</tt><newline>
 <tag/Description/Wait for vertical sync, to reduce flickering.
+<tag/Notes/<itemize>
+<item>The function will silently fail when the feature is not
+supported, like on the Apple&nbsp;&rsqb;&lsqb;+.
+</itemize>
 <tag/Availability/Platforms served by the headers above
 (Atmos requires the VSync hack)
 <tag/Example/None.
