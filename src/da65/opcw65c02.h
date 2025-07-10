@@ -1,15 +1,15 @@
 /*****************************************************************************/
 /*                                                                           */
-/*                                 inline.h                                  */
+/*                                opcw65c02.h                                */
 /*                                                                           */
-/*              Definitions to use the inline compiler feature               */
+/*                      W65C02 opcode description table                      */
 /*                                                                           */
 /*                                                                           */
 /*                                                                           */
-/* (C) 2001-2005  Ullrich von Bassewitz                                      */
-/*                Roemerstrasse 52                                           */
-/*                D-70794 Filderstadt                                        */
-/* EMail:         uz@cc65.org                                                */
+/* (C) 2003      Ullrich von Bassewitz                                       */
+/*               Roemerstrasse 52                                            */
+/*               D-70794 Filderstadt                                         */
+/* EMail:        uz@cc65.org                                                 */
 /*                                                                           */
 /*                                                                           */
 /* This software is provided 'as-is', without any expressed or implied       */
@@ -33,24 +33,26 @@
 
 
 
-#ifndef INLINE_H
-#define INLINE_H
+#ifndef OPCW65C02_H
+#define OPCW65C02_H
+
+
+
+#include "opcdesc.h"
 
 
 
 /*****************************************************************************/
-/*                                  Defines                                  */
+/*                                   Data                                    */
 /*****************************************************************************/
 
 
 
-#if defined(__GNUC__) && !defined(DISABLE_INLINE)
-#  define HAVE_INLINE   1
-#  define INLINE        static __inline__
-#endif
+/* Descriptions for all opcodes */
+extern const OpcDesc OpcTable_W65C02[256];
 
 
 
-/* End of inline.h */
+/* End of opcw65c02.h */
 
 #endif

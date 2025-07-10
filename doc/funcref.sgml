@@ -289,6 +289,7 @@ function.
 <item><ref id="cclear" name="cclear">
 <item><ref id="cclearxy" name="cclearxy">
 <item><ref id="cgetc" name="cgetc">
+<item><ref id="cgets" name="cgets">
 <item><ref id="chline" name="chline">
 <item><ref id="chlinexy" name="chlinexy">
 <item><ref id="clrscr" name="clrscr">
@@ -301,6 +302,7 @@ function.
 <item><ref id="cputcxy" name="cputcxy">
 <item><ref id="cputs" name="cputs">
 <item><ref id="cputsxy" name="cputsxy">
+<item><ref id="cscanf" name="cscanf">
 <item><ref id="cursor" name="cursor">
 <item><ref id="cvline" name="cvline">
 <item><ref id="cvlinexy" name="cvlinexy">
@@ -783,6 +785,7 @@ communication, see also <tt>testcode/lib/ser-test.c</tt>.
 <item><ref id="strcpy" name="strcpy">
 <item><ref id="strcspn" name="strcspn">
 <item><ref id="strdup" name="strdup">
+<item><ref id="strndup" name="strndup">
 <item><ref id="strerror" name="strerror">
 <item><ref id="stricmp" name="stricmp">
 <item><ref id="strlen" name="strlen">
@@ -2715,6 +2718,45 @@ see anything that you type.  (See the description of <tt/cbm_k_scnkey()/.)
 </quote>
 
 
+<sect1>cgets<label id="cgets"><p>
+
+<quote>
+<descrip>
+<tag/Function/Input a string directly from the console.
+<tag/Header/<tt/<ref id="conio.h" name="conio.h">/
+<tag/Declaration/<tt/char* __fastcall__ cgets (const char* buffer, int size);/
+<tag/Description/The function inputs a string of at most <tt/size - 1/
+characters from the console into <tt/buffer/. It returns when <tt/size - 1/
+characters or either <tt/CR/ or <tt/LF/ are entered. It also handles both
+multi-line input and backspacing.
+<tag/Notes/<itemize>
+<item>The function echoes <tt/CRLF/ when either <tt/CR/ or <tt/LF/ are read
+but does NOT append either in <tt/buffer/.
+<item>The function is only available as fastcall function, so it may only
+be used in the presence of a prototype.
+</itemize>
+<tag/Availability/cc65
+<tag/See also/
+<ref id="cgetc" name="cgetc">,
+<ref id="cscanf" name="cscanf">
+<tag/Example/<verb>
+#include &lt;conio.h&gt;
+
+int main (void)
+{
+    char buffer[200], *p;
+
+    cputs ("Type a lot and backspace a lot: ");
+    if (p = cgets (buffer, sizeof(buffer)))
+        cputs (p);
+
+    return 0;
+}
+</verb>
+</descrip>
+</quote>
+
+
 <sect1>chline<label id="chline"><p>
 
 <quote>
@@ -3310,6 +3352,47 @@ be used in presence of a prototype.
 <ref id="cputs" name="cputs">,
 <ref id="vcprintf" name="vcprintf">
 <tag/Example/None.
+</descrip>
+</quote>
+
+
+<sect1>cscanf<label id="cscanf"><p>
+
+<quote>
+<descrip>
+<tag/Function/Read formatted input from the console
+<tag/Header/<tt/<ref id="conio.h" name="conio.h">/
+<tag/Declaration/<tt/int cscanf (const char* format, ...);/
+<tag/Description/The <tt/cscanf()/ function scans input from the console under
+control of the argument <tt/format/. Following the format string is a list of
+addresses to receive values. The format string is identical to that of the
+<tt/scanf()/ function.
+<tag/Notes/<itemize>
+<item>A direct call to <tt/cursor()/ may be required to show the cursor.
+<item>Some control characters like backspaces are not recognized.
+<item>A better user experience can sometimes be provided by using <tt/cgets()/
+to retrieve the input, and then using <tt/sscanf()/ to parse it.
+</itemize>
+<tag/Availability/cc65
+<tag/See also/
+<ref id="cgets" name="cgets">,
+<ref id="cursor" name="cursor">
+<tag/Example/<verb>
+#include &lt;conio.h&gt;
+
+int main (void)
+{
+    int a, b, c;
+
+    cputs ("Type three integers that add to 100: ");
+    if (cscanf ("%d %d %d", &amp;a, &amp;b, &amp;c) == 3 && a + b + c == 100)
+        cputs ("\r\nYou passed!\r\n");
+    else
+        cputs ("\r\nYou failed!\r\n");
+
+    return 0;
+}
+</verb>
 </descrip>
 </quote>
 
@@ -5539,6 +5622,7 @@ be used in presence of a prototype.
 <ref id="free" name="free">,
 <ref id="realloc" name="realloc">,
 <ref id="strdup" name="strdup">
+<ref id="strndup" name="strndup">
 <tag/Example/None.
 </descrip>
 </quote>
@@ -7692,6 +7776,35 @@ be used in presence of a prototype.
 <tag/See also/
 <ref id="free" name="free">,
 <ref id="malloc" name="malloc">
+<ref id="strndup" name="strndup">
+<tag/Example/None.
+</descrip>
+</quote>
+
+
+
+
+<sect1>strndup<label id="strndup"><p>
+
+<quote>
+<descrip>
+<tag/Function/Allocate a copy of a string on the heap, of a given maximum length.
+<tag/Header/<tt/<ref id="string.h" name="string.h">/
+<tag/Declaration/<tt/char* __fastcall__ strndup (const char* s, size_t maxlen);/
+<tag/Description/<tt/strndup/ allocates a memory block on the heap, big enough
+to hold a copy of <tt/s/ including the terminating zero. If the allocation
+fails, <tt/NULL/ is returned, otherwise <tt/s/ is copied into the allocated
+memory block, maxlen characters are kept, and a pointer to the block is returned.
+<tag/Notes/<itemize>
+<item>The function is only available as fastcall function, so it may only
+be used in presence of a prototype.
+<item>It is up to the caller to free the allocated memory block.
+</itemize>
+<tag/Availability/ISO 9899
+<tag/See also/
+<ref id="free" name="free">,
+<ref id="malloc" name="malloc">
+<ref id="strndup" name="strndup">
 <tag/Example/None.
 </descrip>
 </quote>

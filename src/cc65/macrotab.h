@@ -40,7 +40,6 @@
 
 /* common */
 #include "coll.h"
-#include "inline.h"
 #include "strbuf.h"
 
 
@@ -58,6 +57,7 @@ struct Macro {
     int           ParamCount;   /* Number of parameters, -1 = no parens */
     Collection    Params;       /* Parameter list (char*) */
     StrBuf        Replacement;  /* Replacement text */
+    unsigned char Predefined;   /* True if this is a predefined macro */
     unsigned char Variadic;     /* C99 variadic macro */
     char          Name[1];      /* Name, dynamically allocated */
 };
@@ -70,7 +70,7 @@ struct Macro {
 
 
 
-Macro* NewMacro (const char* Name);
+Macro* NewMacro (const char* Name, unsigned char Predefined);
 /* Allocate a macro structure with the given name. The structure is not
 ** inserted into the macro table.
 */
@@ -87,10 +87,10 @@ Macro* CloneMacro (const Macro* M);
 */
 
 void DefineNumericMacro (const char* Name, long Val);
-/* Define a macro for a numeric constant */
+/* Define a predefined macro for a numeric constant */
 
 void DefineTextMacro (const char* Name, const char* Val);
-/* Define a macro for a textual constant */
+/* Define a predefined macro for a textual constant */
 
 void InsertMacro (Macro* M);
 /* Insert the given macro into the macro table. */
@@ -108,15 +108,11 @@ void FreeUndefinedMacros (void);
 Macro* FindMacro (const char* Name);
 /* Find a macro with the given name. Return the macro definition or NULL */
 
-#if defined(HAVE_INLINE)
-INLINE int IsMacro (const char* Name)
+static inline int IsMacro (const char* Name)
 /* Return true if the given name is the name of a macro, return false otherwise */
 {
     return FindMacro (Name) != 0;
 }
-#else
-#  define IsMacro(Name)         (FindMacro (Name) != 0)
-#endif
 
 int FindMacroParam (const Macro* M, const char* Param);
 /* Search for a macro parameter. If found, return the index of the parameter.
@@ -131,6 +127,12 @@ int MacroCmp (const Macro* M1, const Macro* M2);
 
 void PrintMacroStats (FILE* F);
 /* Print macro statistics to the given text file. */
+
+void OutputPredefMacros (void);
+/* Output all predefined macros to the output file */
+
+void OutputUserMacros (void);
+/* Output all user defined macros to the output file */
 
 
 

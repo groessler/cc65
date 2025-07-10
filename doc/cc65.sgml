@@ -63,6 +63,8 @@ Short options:
   -V                            Print the compiler version number
   -W [-+]warning[,...]          Control warnings ('-' disables, '+' enables)
   -d                            Debug mode
+  -dM                           Output all user macros (needs -E)
+  -dP                           Output all predefined macros (needs -E)
   -g                            Add debug info to object file
   -h                            Help (this text)
   -j                            Default characters are signed
@@ -197,6 +199,28 @@ Here is a description of all the command line options:
   <tag><tt>-d, --debug</tt></tag>
 
   Enables debug mode, for debugging the behavior of cc65.
+
+
+
+  <label id="option-dM">
+  <tag><tt>-dM</tt></tag>
+
+  When used with -E, will output <tt>#define</tt> directives for all the user
+  macros defined during execution of the preprocessor. This does not include
+  macros defined by the compiler.
+
+  Note: Can be combined with <tt/<ref id="option-dP" name="-dP">/ by using
+  <tt/-dMP/.
+
+
+  <label id="option-dP">
+  <tag><tt>-dP</tt></tag>
+
+  When used with -E, will output <tt>#define</tt> directives for all the macros
+  defined by the compiler itself. This does not include any user defined macros.
+
+  Note: Can be combined with <tt/<ref id="option-dM" name="-dM">/ by using
+  <tt/-dMP/.
 
 
   <tag><tt>--debug-tables name</tt></tag>
@@ -586,27 +610,42 @@ Here is a description of all the command line options:
 
   <itemize>
   <item>none
+  <item>agat (a russian apple2 like computer)
   <item>apple2
   <item>apple2enh
   <item>atari
+  <item>atari2600
+  <item>atari5200
+  <item>atari7800
   <item>atarixl
   <item>atmos
+  <item>bbc
   <item>c16 (works also for the c116 with memory up to 32K)
   <item>c64
+  <item>c65
   <item>c128
   <item>cbm510 (CBM-II series with 40 column video)
   <item>cbm610 (all CBM-II II computers with 80 column video)
+  <item>creativision
+  <item>cx16
+  <item>gamate
   <item>geos-apple
   <item>geos-cbm
+  <item>geos (alias for geos-cbm)
+  <item>kim1
   <item>lunix
   <item>lynx
+  <item>mega65
   <item>nes
   <item>osic1p
+  <item>pce (PC engine)
   <item>pet (all CBM PET systems except the 2001)
   <item>plus4
+  <item>rp6502
   <item>sim6502
   <item>sim65c02
   <item>supervision
+  <item>sym1
   <item>telestrat
   <item>vic20
   </itemize>
@@ -1073,6 +1112,10 @@ This cc65 version has some extensions to the ISO C standard.
 The compiler defines several macros at startup:
 
 <descrip>
+  <tag><tt>__AGAT__</tt></tag>
+
+  This macro is defined if the target is the Agat (-t agat).
+
   <tag><tt>__APPLE2__</tt></tag>
 
   This macro is defined if the target is the Apple ][ (-t apple2) or the enhanced Apple //e (-t apple2enh).
@@ -1083,11 +1126,15 @@ The compiler defines several macros at startup:
 
   <tag><tt>__ATARI2600__</tt></tag>
 
-  This macro is defined if the target is the Atari 2600 game console.
+  This macro is defined if the target is the Atari 2600 game console (-t atari2600).
 
   <tag><tt>__ATARI5200__</tt></tag>
 
-  This macro is defined if the target is the Atari 5200 game console.
+  This macro is defined if the target is the Atari 5200 game console (-t atari5200).
+
+  <tag><tt>__ATARI7800__</tt></tag>
+
+  This macro is defined if the target is the Atari 7800 game console (-t atari7800).
 
   <tag><tt>__ATARI__</tt></tag>
 
@@ -1101,6 +1148,10 @@ The compiler defines several macros at startup:
 
   This macro is defined if the target is the Oric Atmos (-t atmos).
 
+  <tag><tt>__BBC__</tt></tag>
+
+  This macro is defined if the target is the BBC (-t bbc).
+
   <tag><tt>__C128__</tt></tag>
 
   This macro is defined if the target is the Commodore 128 (-t c128).
@@ -1112,6 +1163,10 @@ The compiler defines several macros at startup:
   <tag><tt>__C64__</tt></tag>
 
   This macro is defined if the target is the Commodore 64 (-t c64).
+
+  <tag><tt>__C65__</tt></tag>
+
+  This macro is defined if the target is the Commodore 65 (-t c65).
 
   <tag><tt>__CBM__</tt></tag>
 
@@ -1157,10 +1212,8 @@ The compiler defines several macros at startup:
   <label id="macro-CPU">
   <tag><tt>__CPU__</tt></tag>
 
-  This macro contains a bitset that allows to check if a specific instruction
-  set is supported. For example, the 65C02 CPU supports all instructions of the
-  65SC02. So testing for the instruction set of the 65SC02 using the following
-  check will succeed for both CPUs (and also for the 65816 and HUC6280).
+  This macro contains a bitset that allows to check if a specific group of
+  instructions is supported.
 
   <tscreen><verb>
   #if (__CPU__ & __CPU_ISET_65SC02__)
@@ -1172,6 +1225,21 @@ The compiler defines several macros at startup:
   checks. The <tt/__CPU__/ variable is usually derived from the target system
   given, but can be changed using the <tt/<ref id="option--cpu" name="--cpu">/
   command line option.
+
+  Note that, since the different CMOS instruction sets are not orthogonal, the
+  following test macros only test for the group of instructions <bf>added</bf>
+  by this particular CPU.
+
+  see <htmlurl url="ca65.html#.CPU" name=".CPU"> for details on the ISET*
+  dilemma.
+
+  <tag><tt>__CPU_4510__</tt></tag>
+
+  This macro is defined if the code is compiled for a 4510 CPU.
+
+  <tag><tt>__CPU_45GS02__</tt></tag>
+
+  This macro is defined if the code is compiled for a 45GS02 CPU.
 
   <tag><tt>__CPU_6502__</tt></tag>
 
@@ -1194,6 +1262,10 @@ The compiler defines several macros at startup:
 
   This macro is defined if the code is compiled for a 65C02 CPU.
 
+  <tag><tt>__CPU_65CE02__</tt></tag>
+
+  This macro is defined if the code is compiled for a 65CE02 CPU.
+
   <tag><tt>__CPU_65816__</tt></tag>
 
   This macro is defined if the code is compiled for a 65816 CPU.
@@ -1201,6 +1273,14 @@ The compiler defines several macros at startup:
   <tag><tt>__CPU_HUC6280__</tt></tag>
 
   This macro is defined if the code is compiled for a HUC6280 CPU.
+
+  <tag><tt>__CPU_M740__</tt></tag>
+
+  This macro is defined if the code is compiled for a M740 CPU.
+
+  <tag><tt>__CPU_W65C02__</tt></tag>
+
+  This macro is defined if the code is compiled for a W65C02 CPU.
 
   <tag><tt>__CPU_ISET_6502__</tt></tag>
 
@@ -1232,6 +1312,12 @@ The compiler defines several macros at startup:
   <tt/<ref id="macro-CPU" name="__CPU__">/ macro for the instruction set
   of the 65C02 CPU.
 
+  <tag><tt>__CPU_ISET_65CE02__</tt></tag>
+
+  This macro expands to a numeric constant that can be used to check the
+  <tt/<ref id="macro-CPU" name="__CPU__">/ macro for the instruction set
+  of the 65CE02 CPU.
+
   <tag><tt>__CPU_ISET_65816__</tt></tag>
 
   This macro expands to a numeric constant that can be used to check the
@@ -1243,6 +1329,22 @@ The compiler defines several macros at startup:
   This macro expands to a numeric constant that can be used to check the
   <tt/<ref id="macro-CPU" name="__CPU__">/ macro for the instruction set
   of the HUC6280 CPU.
+
+  <tag><tt>__CPU_ISET_M740__</tt></tag>
+
+  This macro expands to a numeric constant that can be used to check the
+  <tt/<ref id="macro-CPU" name="__CPU__">/ macro for the instruction set
+  of the M740 CPU.
+
+  <tag><tt>__CPU_ISET_W65C02__</tt></tag>
+
+  This macro expands to a numeric constant that can be used to check the
+  <tt/<ref id="macro-CPU" name="__CPU__">/ macro for the instruction set
+  of the W65C02 CPU.
+
+  <tag><tt>__CREATIVISION__</tt></tag>
+
+  This macro is defined if the target is the VTech Creativision game console (-t creativision).
 
   <tag><tt>__CX16__</tt></tag>
 
@@ -1262,6 +1364,10 @@ The compiler defines several macros at startup:
 
   This macro expands to a string containing the name of the C source file.
 
+  <tag><tt>__GAMATE__</tt></tag>
+
+  This macro is defined if the target is the Gamate handheld (-t gamate).
+
   <tag><tt>__GEOS__</tt></tag>
 
   This macro is defined if you are compiling for one of the GEOS systems.
@@ -1274,6 +1380,10 @@ The compiler defines several macros at startup:
 
   This macro is defined if you are compiling for the GEOS 64/128 system (-t geos-cbm).
 
+  <tag><tt>__KIM1__</tt></tag>
+
+  This macro is defined if the target is the KIM-1 (-t kmi1).
+
   <tag><tt>__LINE__</tt></tag>
 
   This macro expands to the current line number.
@@ -1285,6 +1395,10 @@ The compiler defines several macros at startup:
   <tag><tt>__LYNX__</tt></tag>
 
   This macro is defined if the target is the Atari Lynx (-t lynx).
+
+  <tag><tt>__MEGA65__</tt></tag>
+
+  This macro is defined if the target is the Mega 65 (-t mega65).
 
   <tag><tt>__NES__</tt></tag>
 
@@ -1311,6 +1425,10 @@ The compiler defines several macros at startup:
   This macro is defined if the target is the Ohio Scientific Challenger 1P
   (-t osic1p).
 
+  <tag><tt>__PCE__</tt></tag>
+
+  This macro is defined if the target is the PC Engine game console (-t pce).
+
   <tag><tt>__PET__</tt></tag>
 
   This macro is defined if the target is the PET family of computers (-t pet).
@@ -1318,6 +1436,10 @@ The compiler defines several macros at startup:
   <tag><tt>__PLUS4__</tt></tag>
 
   This macro is defined if the target is the Commodore Plus/4 (-t plus4).
+
+  <tag><tt>__RP6502__</tt></tag>
+
+  This macro is defined if the target is the Picocomputer 6502 (-t rp6502).
 
   <tag><tt>__SIM6502__</tt></tag>
 
