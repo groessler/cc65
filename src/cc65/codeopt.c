@@ -107,6 +107,8 @@ struct OptFunc {
 static OptFunc DOpt65C02BitOps  = { Opt65C02BitOps,  "Opt65C02BitOps",   66, 0, 0, 0, 0, 0 };
 static OptFunc DOpt65C02Ind     = { Opt65C02Ind,     "Opt65C02Ind",     100, 0, 0, 0, 0, 0 };
 static OptFunc DOpt65C02Stores  = { Opt65C02Stores,  "Opt65C02Stores",  100, 0, 0, 0, 0, 0 };
+static OptFunc DOptAXLoad       = { OptAXLoad,       "OptAXLoad",        50, 0, 0, 0, 0, 0 };
+static OptFunc DOptAXOps        = { OptAXOps,        "OptAXOps",         50, 0, 0, 0, 0, 0 };
 static OptFunc DOptAdd1         = { OptAdd1,         "OptAdd1",         125, 0, 0, 0, 0, 0 };
 static OptFunc DOptAdd2         = { OptAdd2,         "OptAdd2",         200, 0, 0, 0, 0, 0 };
 static OptFunc DOptAdd3         = { OptAdd3,         "OptAdd3",          65, 0, 0, 0, 0, 0 };
@@ -230,6 +232,8 @@ static OptFunc* OptFuncs[] = {
     &DOpt65C02BitOps,
     &DOpt65C02Ind,
     &DOpt65C02Stores,
+    &DOptAXLoad,
+    &DOptAXOps,
     &DOptAdd1,
     &DOptAdd2,
     &DOptAdd3,
@@ -629,6 +633,7 @@ static unsigned RunOptGroup1 (CodeSeg* S)
 
     Changes += RunOptFunc (S, &DOptGotoSPAdj, 1);
     Changes += RunOptFunc (S, &DOptStackPtrOps, 5);
+    Changes += RunOptFunc (S, &DOptAXOps, 5);
     Changes += RunOptFunc (S, &DOptAdd3, 1);    /* Before OptPtrLoad5! */
     Changes += RunOptFunc (S, &DOptPtrStore1, 1);
     Changes += RunOptFunc (S, &DOptPtrStore2, 1);
@@ -871,6 +876,7 @@ static unsigned RunOptGroup7 (CodeSeg* S)
         ** may have opened new oportunities.
         */
         Changes += RunOptFunc (S, &DOptUnusedLoads, 1);
+        Changes += RunOptFunc (S, &DOptAXLoad, 5);
         Changes += RunOptFunc (S, &DOptUnusedStores, 1);
         Changes += RunOptFunc (S, &DOptJumpTarget1, 5);
         Changes += RunOptFunc (S, &DOptStore5, 1);
@@ -906,6 +912,11 @@ static unsigned RunOptGroup7 (CodeSeg* S)
     /* Adjust branch distances again, since the previous step may change code
        between branches */
     C += RunOptFunc (S, &DOptBranchDist, 3);
+
+    /* Re-optimize inc/decsp that may now be grouped */
+    C += RunOptFunc (S, &DOptStackPtrOps, 5);
+    /* Re-optimize JSR/RTS that may now be grouped */
+    C += RunOptFunc (S, &DOptRTS, 1);
 
     Changes += C;
     /* If we had changes, we must run dead code elimination again,

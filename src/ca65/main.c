@@ -42,6 +42,7 @@
 #include "addrsize.h"
 #include "chartype.h"
 #include "cmdline.h"
+#include "consprop.h"
 #include "debugflag.h"
 #include "mmodel.h"
 #include "print.h"
@@ -56,6 +57,7 @@
 #include "asserts.h"
 #include "dbginfo.h"
 #include "error.h"
+#include "expect.h"
 #include "expr.h"
 #include "feature.h"
 #include "filetab.h"
@@ -105,17 +107,21 @@ static void Usage (void)
             "  -mm model\t\t\tSet the memory model\n"
             "  -o name\t\t\tName the output file\n"
             "  -s\t\t\t\tEnable smart mode\n"
+            "  -S\t\t\t\tEnable segment offset listing\n"
             "  -t sys\t\t\tSet the target system\n"
             "  -v\t\t\t\tIncrease verbosity\n"
+            "  -x\t\t\t\tExpand macros\n"
             "\n"
             "Long options:\n"
             "  --auto-import\t\t\tMark unresolved symbols as import\n"
             "  --bin-include-dir dir\t\tSet a search path for binary includes\n"
+            "  --color [on|auto|off]\t\tColor diagnostics (default: auto)\n"
             "  --cpu type\t\t\tSet cpu type\n"
             "  --create-dep name\t\tCreate a make dependency file\n"
             "  --create-full-dep name\tCreate a full make dependency file\n"
             "  --debug\t\t\tDebug mode\n"
             "  --debug-info\t\t\tAdd debug info to object file\n"
+            "  --expand-macros\t\tExpand macros in the listing\n"
             "  --feature name\t\tSet an emulation feature\n"
             "  --help\t\t\tHelp (this text)\n"
             "  --ignore-case\t\t\tIgnore case of symbols\n"
@@ -124,12 +130,15 @@ static void Usage (void)
             "  --listing name\t\tCreate a listing file if assembly was ok\n"
             "  --list-bytes n\t\tMaximum number of bytes per listing line\n"
             "  --memory-model model\t\tSet the memory model\n"
+            "  --no-utf8\t\t\tDisable use of UTF-8 in diagnostics\n"
             "  --pagelength n\t\tSet the page length for the listing\n"
             "  --relax-checks\t\tRelax some checks (see docs)\n"
+            "  --segment-list\t\tEnable segment offset listing\n"
             "  --smart\t\t\tEnable smart mode\n"
             "  --target sys\t\t\tSet the target system\n"
             "  --verbose\t\t\tIncrease verbosity\n"
-            "  --version\t\t\tPrint the assembler version\n",
+            "  --version\t\t\tPrint the assembler version\n"
+            "  --warnings-as-errors\t\tTreat warnings as errors\n",
             ProgName);
 }
 
@@ -145,7 +154,7 @@ static void SetOptions (void)
     OptTranslator (&Buf);
 
     /* Set date and time */
-    OptDateTime ((unsigned long) time(0));
+    OptDateTime ((unsigned long) time (0));
 
     /* Release memory for the string */
     SB_Done (&Buf);
@@ -492,6 +501,19 @@ static void OptBinIncludeDir (const char* Opt attribute ((unused)), const char* 
 
 
 
+static void OptColor(const char* Opt, const char* Arg)
+/* Handle the --color option */
+{
+    ColorMode Mode = CP_Parse (Arg);
+    if (Mode == CM_INVALID) {
+        AbEnd ("Invalid argument to %s: %s", Opt, Arg);
+    } else {
+        CP_SetColorMode (Mode);
+    }
+}
+
+
+
 static void OptCPU (const char* Opt attribute ((unused)), const char* Arg)
 /* Handle the --cpu option */
 {
@@ -622,7 +644,7 @@ static void OptListing (const char* Opt, const char* Arg)
     ** the filename is empty or begins with the option char.
     */
     if (Arg == 0 || *Arg == '\0' || *Arg == '-') {
-        Fatal ("The meaning of '%s' has changed. It does now "
+        Fatal ("The meaning of `%s' has changed. It does now "
                "expect a file name as argument.", Opt);
     }
 
@@ -652,6 +674,15 @@ static void OptMemoryModel (const char* Opt, const char* Arg)
 
     /* Set the memory model */
     SetMemoryModel (M);
+}
+
+
+
+static void OptNoUtf8 (const char* Opt attribute ((unused)),
+                       const char* Arg attribute ((unused)))
+/* Handle the --no-utf8 option */
+{
+    CP_DisableUTF8 ();
 }
 
 
@@ -708,7 +739,16 @@ static void OptVersion (const char* Opt attribute ((unused)),
 /* Print the assembler version */
 {
     fprintf (stderr, "%s V%s\n", ProgName, GetVersionAsString ());
-    exit(EXIT_SUCCESS);
+    exit (EXIT_SUCCESS);
+}
+
+
+
+static void OptSeglist (const char* Opt attribute ((unused)),
+    const char* Arg attribute ((unused)))
+    /* Enable segment listing */
+{
+    SegList = 1;
 }
 
 
@@ -722,12 +762,25 @@ static void OptWarningsAsErrors (const char* Opt attribute ((unused)),
 
 
 
+static void OptExpandMacros (const char* Opt attribute ((unused)),
+    const char* Arg attribute ((unused)))
+    /* Expand macros in listing
+    ** one -x means short listing
+    ** two means full listing
+    */
+{
+
+    ExpandMacros++;
+}
+
+
+
 static void DoPCAssign (void)
 /* Start absolute code */
 {
     long PC = ConstExpression ();
     if (PC < 0 || PC > 0xFFFFFF) {
-        Error ("Range error");
+        Error ("Program counter value is out of valid range");
     } else {
         EnterAbsoluteMode (PC);
     }
@@ -745,9 +798,10 @@ static void OneLine (void)
     int           Instr = -1;
 
     /* Initialize the new listing line if we are actually reading from file
-    ** and not from internally pushed input.
+    ** and not from internally pushed input
     */
-    if (!HavePushedInput ()) {
+
+    if (!HavePushedInput () ) {
         InitListingLine ();
     }
 
@@ -771,7 +825,7 @@ static void OneLine (void)
         if (CurTok.Tok == TOK_COLON) {
             NextTok ();
         } else if (CurTok.WS || !NoColonLabels) {
-            Error ("':' expected");
+            Error ("`:' expected");
         }
     }
 
@@ -820,11 +874,10 @@ static void OneLine (void)
             NextTok ();
 
             /* Define the symbol with the expression following the '=' */
-            SymDef (Sym, Expression(), ADDR_SIZE_DEFAULT, Flags);
+            SymDef (Sym, Expression (), ADDR_SIZE_DEFAULT, Flags);
 
             /* Don't allow anything after a symbol definition */
-            ConsumeSep ();
-            return;
+            goto Done;
 
         } else if (CurTok.Tok == TOK_SET) {
 
@@ -842,8 +895,7 @@ static void OneLine (void)
             SymDef (Sym, Expr, ADDR_SIZE_DEFAULT, SF_VAR);
 
             /* Don't allow anything after a symbol definition */
-            ConsumeSep ();
-            return;
+            goto Done;
 
         } else {
 
@@ -853,25 +905,23 @@ static void OneLine (void)
             Seg = ActiveSeg;
             PC  = GetPC ();
 
-            /* Define the label */
-            SymDef (Sym, GenCurrentPC (), ADDR_SIZE_DEFAULT, SF_LABEL);
-
             /* Skip the colon. If NoColonLabels is enabled, allow labels
             ** without a colon if there is no whitespace before the
             ** identifier.
             */
             if (CurTok.Tok != TOK_COLON) {
                 if (HadWS || !NoColonLabels) {
-                    Error ("':' expected");
-                    /* Try some smart error recovery */
-                    if (CurTok.Tok == TOK_NAMESPACE) {
-                        NextTok ();
-                    }
+                    ErrorExpect ("Expected `:' after identifier to form a label");
+                    SkipUntilSep ();
+                    goto Done;
                 }
             } else {
                 /* Skip the colon */
                 NextTok ();
             }
+
+            /* Define the label */
+            SymDef (Sym, GenCurrentPC (), ADDR_SIZE_DEFAULT, SF_LABEL);
 
             /* If we come here, a new identifier may be waiting, which may
             ** be a macro or instruction.
@@ -906,16 +956,22 @@ static void OneLine (void)
         HandleInstruction (Instr);
     } else if (PCAssignment && (CurTok.Tok == TOK_STAR || CurTok.Tok == TOK_PC)) {
         NextTok ();
-        if (CurTok.Tok != TOK_EQ) {
-            Error ("'=' expected");
-            SkipUntilSep ();
-        } else {
-            /* Skip the equal sign */
-            NextTok ();
-            /* Enter absolute mode */
-            DoPCAssign ();
+        if (!ExpectSkip (TOK_EQ, "Expected `='")) {
+            goto Done;
         }
+        /* Skip the equal sign */
+        NextTok ();
+        /* Enter absolute mode */
+        DoPCAssign ();
+    } else if ((CurTok.Tok >= TOK_FIRSTOP && CurTok.Tok <= TOK_LASTOP) ||
+               (CurTok.Tok >= TOK_FIRSTREG && CurTok.Tok <= TOK_LASTREG) ||
+               CurTok.Tok == TOK_INTCON || CurTok.Tok == TOK_CHARCON ||
+               CurTok.Tok == TOK_STRCON) {
+        ErrorExpect ("Expected a mnemonic");
+        SkipUntilSep ();
+        goto Done;
     }
+
 
     /* If we have defined a label, remember its size. Sym is also set by
     ** a symbol assignment, but in this case Done is false, so we don't
@@ -938,6 +994,7 @@ static void OneLine (void)
         }
     }
 
+Done:
     /* Line separator must come here */
     ConsumeSep ();
 }
@@ -954,6 +1011,7 @@ static void Assemble (void)
     while (CurTok.Tok != TOK_EOF) {
         OneLine ();
     }
+
 }
 
 
@@ -1010,11 +1068,13 @@ int main (int argc, char* argv [])
     static const LongOpt OptTab[] = {
         { "--auto-import",         0,      OptAutoImport           },
         { "--bin-include-dir",     1,      OptBinIncludeDir        },
+        { "--color",               1,      OptColor                },
         { "--cpu",                 1,      OptCPU                  },
         { "--create-dep",          1,      OptCreateDep            },
         { "--create-full-dep",     1,      OptCreateFullDep        },
         { "--debug",               0,      OptDebug                },
         { "--debug-info",          0,      OptDebugInfo            },
+        { "--expand-macros",       0,      OptExpandMacros         },
         { "--feature",             1,      OptFeature              },
         { "--help",                0,      OptHelp                 },
         { "--ignore-case",         0,      OptIgnoreCase           },
@@ -1023,8 +1083,10 @@ int main (int argc, char* argv [])
         { "--list-bytes",          1,      OptListBytes            },
         { "--listing",             1,      OptListing              },
         { "--memory-model",        1,      OptMemoryModel          },
+        { "--no-utf8",             0,      OptNoUtf8               },
         { "--pagelength",          1,      OptPageLength           },
         { "--relax-checks",        0,      OptRelaxChecks          },
+        { "--segment-list",        0,      OptSeglist              },
         { "--smart",               0,      OptSmart                },
         { "--target",              1,      OptTarget               },
         { "--verbose",             0,      OptVerbose              },
@@ -1036,6 +1098,9 @@ int main (int argc, char* argv [])
     static const StrBuf GlobalNameSpace = STATIC_STRBUF_INITIALIZER;
 
     unsigned I;
+
+    /* Initialize console output */
+    CP_Init ();
 
     /* Initialize the cmdline module */
     InitCmdLine (&argc, &argv, "ca65");
@@ -1110,6 +1175,10 @@ int main (int argc, char* argv [])
                     OptSmart (Arg, 0);
                     break;
 
+                case 'S':
+                    OptSeglist (Arg, 0);
+                    break;
+
                 case 't':
                     OptTarget (Arg, GetArg (&I, 2));
                     break;
@@ -1137,6 +1206,10 @@ int main (int argc, char* argv [])
                 case 'W':
                     WarnLevel = atoi (GetArg (&I, 2));
                     break;
+                case 'x':
+                    ExpandMacros++;
+                    break;
+
 
                 default:
                     UnknownOption (Arg);
@@ -1235,7 +1308,7 @@ int main (int argc, char* argv [])
     }
 
     if (WarningCount > 0 && WarningsAsErrors) {
-        Error("Warnings as errors");
+        Error ("Warnings as errors");
     }
 
     /* If we didn't have an errors, finish off the line infos */

@@ -94,23 +94,29 @@ Short options:
   -W n                          Set warning level n
   -d                            Debug mode
   -g                            Add debug info to object file
+  -x                            Expand macros in the listing
+                                repeat -x for full expansion
   -h                            Help (this text)
   -i                            Ignore case of symbols
   -l name                       Create a listing file if assembly was ok
   -mm model                     Set the memory model
   -o name                       Name the output file
   -s                            Enable smart mode
+  -S                            Generate segment offsets in listing
   -t sys                        Set the target system
   -v                            Increase verbosity
 
 Long options:
   --auto-import                 Mark unresolved symbols as import
   --bin-include-dir dir         Set a search path for binary includes
+  --color [on|auto|off]         Color diagnostics (default: auto)
   --cpu type                    Set cpu type
   --create-dep name             Create a make dependency file
   --create-full-dep name        Create a full make dependency file
   --debug                       Debug mode
   --debug-info                  Add debug info to object file
+  --expand-macros               Expand macros in listing
+                                Repeat to get full expansion
   --feature name                Set an emulation feature
   --help                        Help (this text)
   --ignore-case                 Ignore case of symbols
@@ -119,8 +125,10 @@ Long options:
   --listing name                Create a listing file if assembly was ok
   --list-bytes n                Maximum number of bytes per listing line
   --memory-model model          Set the memory model
+  --no-utf8                     Disable use of UTF-8 in diagnostics
   --pagelength n                Set the page length for the listing
-  --relax-checks                Disables some error checks
+  --relax-checks                Relax some checks (see docs)
+  --segment-list                Generate segment offsets in listing
   --smart                       Enable smart mode
   --target sys                  Set the target system
   --verbose                     Increase verbosity
@@ -144,6 +152,14 @@ Here is a description of all the command line options:
   current directory is always searched first before considering any
   additional directories. See also the section about <ref id="search-paths"
   name="search paths">.
+
+
+  <label id="option--color">
+  <tag><tt>--color</tt></tag>
+
+  This option controls if the assembler will use colors when printing
+  diagnostics. The default is "auto" which will enable colors if the output
+  goes to a terminal (not to a file).
 
 
   <label id="option--cpu">
@@ -192,6 +208,16 @@ Here is a description of all the command line options:
   mortals:-)
 
 
+  <label id="option-D">
+  <tag><tt>-D</tt></tag>
+
+  This option allows you to define symbols on the command line. Without a
+  value, the symbol is defined with the value zero. When giving a value,
+  you may use the '&dollar;' prefix for hexadecimal symbols. Please note
+  that for some operating systems, '&dollar;' has a special meaning, so
+  you may have to quote the expression.
+
+
   <label id="option--feature">
   <tag><tt>--feature name</tt></tag>
 
@@ -219,6 +245,16 @@ Here is a description of all the command line options:
   <tag><tt>-h, --help</tt></tag>
 
   Print the short option summary shown above.
+
+
+  <label id="option-I">
+  <tag><tt>-I dir, --include-dir dir</tt></tag>
+
+  Name a directory which is searched for include files. The option may be
+  used more than once to specify more than one directory to search. The
+  current directory is always searched first before considering any
+  additional directories. See also the section about <ref id="search-paths"
+  name="search paths">.
 
 
   <label id="option-i">
@@ -259,6 +295,14 @@ Here is a description of all the command line options:
   huge.
 
 
+  <label id="option--no-utf8">
+  <tag><tt>--no-utf8</tt></tag>
+
+  Disable the use of UTF-8 characters in diagnostics. This might be necessary
+  if auto detection fails or if the output is captured for processing with a
+  tool that is not UTF-8 capable.
+
+
   <label id="option-o">
   <tag><tt>-o name</tt></tag>
 
@@ -292,6 +336,12 @@ Here is a description of all the command line options:
 </itemize>
 
 
+  <label id="option-S">
+  <tag><tt>-S, --segment-list</tt></tag>
+
+  Add the segment ID in front of each address in the listing file.
+
+
   <label id="option-s">
   <tag><tt>-s, --smart-mode</tt></tag>
 
@@ -321,34 +371,6 @@ Here is a description of all the command line options:
   overridden by using the <tt/<ref id="option--cpu" name="--cpu">/ option.
 
 
-  <label id="option-v">
-  <tag><tt>-v, --verbose</tt></tag>
-
-  Increase the assembler verbosity. Usually only needed for debugging
-  purposes. You may use this option more than one time for even more
-  verbose output.
-
-
-  <label id="option-D">
-  <tag><tt>-D</tt></tag>
-
-  This option allows you to define symbols on the command line. Without a
-  value, the symbol is defined with the value zero. When giving a value,
-  you may use the '&dollar;' prefix for hexadecimal symbols. Please note
-  that for some operating systems, '&dollar;' has a special meaning, so
-  you may have to quote the expression.
-
-
-  <label id="option-I">
-  <tag><tt>-I dir, --include-dir dir</tt></tag>
-
-  Name a directory which is searched for include files. The option may be
-  used more than once to specify more than one directory to search. The
-  current directory is always searched first before considering any
-  additional directories. See also the section about <ref id="search-paths"
-  name="search paths">.
-
-
   <label id="option-U">
   <tag><tt>-U, --auto-import</tt></tag>
 
@@ -359,6 +381,14 @@ Here is a description of all the command line options:
   symbols for the runtime library. However, the compiler is supposed to
   generate code that runs through the assembler without problems, something
   which is not always true for assembler programmers.
+
+
+  <label id="option-v">
+  <tag><tt>-v, --verbose</tt></tag>
+
+  Increase the assembler verbosity. Usually only needed for debugging
+  purposes. You may use this option more than one time for even more
+  verbose output.
 
 
   <label id="option-V">
@@ -382,6 +412,12 @@ Here is a description of all the command line options:
 
   An error will be generated if any warnings were produced.
 
+
+  <label id="option-x">
+  <tag><tt>-x, --expand-macros</tt></tag>
+
+  In the listing file, show exactly how macros were expanded. Use twice for
+  more verbose output.
 
 </descrip>
 <p>
