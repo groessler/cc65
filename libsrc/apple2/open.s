@@ -9,7 +9,7 @@
         .constructor    raisefilelevel
         .destructor     closeallfiles, 5
 
-        .import         pushname, popname, __dos_type
+        .import         pushname_tos, popname, mli_set_pathname_tos, __dos_type
         .import         iobuf_alloc, iobuf_free
         .import         addysp, incsp4, incaxy, pushax, popax
 
@@ -68,8 +68,7 @@ errno:  jsr     incsp4          ; Preserves A
         jmp     ___directerrno
 
         ; Save fdtab slot
-found:  tya
-        pha
+found:  sty     tmp2
 
         ; Alloc I/O buffer
         lda     #<(fdtab + FD::BUFFER)
@@ -81,30 +80,18 @@ found:  tya
         jsr     pushax          ; Preserves A
         ldx     #>$0400
         jsr     iobuf_alloc
-        tay                     ; Save errno code
-
-        ; Restore fdtab slot
-        pla
-        sta     tmp2            ; Save fdtab slot
-
-        ; Check for error
-        tya                     ; Restore errno code
-        bne     errno
+        bne     errno           ; Check for error
 
         ; Get and save flags
         jsr     popax
         sta     tmp3
 
         ; Get and push name
-        jsr     popax
-        jsr     pushname
+        jsr     pushname_tos
         bne     oserr1
 
         ; Set pushed name
-        lda     c_sp
-        ldx     c_sp+1
-        sta     mliparam + MLI::OPEN::PATHNAME
-        stx     mliparam + MLI::OPEN::PATHNAME+1
+        jsr     mli_set_pathname_tos
 
         ; Check for create flag
         lda     tmp3            ; Restore flags

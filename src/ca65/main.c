@@ -138,6 +138,7 @@ static void Usage (void)
             "  --target sys\t\t\tSet the target system\n"
             "  --verbose\t\t\tIncrease verbosity\n"
             "  --version\t\t\tPrint the assembler version\n"
+            "  --warn-align-waste\t\tPrint bytes \"wasted\" for alignment\n"
             "  --warnings-as-errors\t\tTreat warnings as errors\n",
             ProgName);
 }
@@ -410,9 +411,6 @@ static void SetSys (const char* Sys)
             AbEnd ("Invalid target name: '%s'", Sys);
 
     }
-
-    /* Define the symbols for evaluating .cpu */
-    DefineCpuSymbols ();
 
     /* Initialize the translation tables for the target system */
     TgtTranslateInit ();
@@ -749,6 +747,15 @@ static void OptSeglist (const char* Opt attribute ((unused)),
     /* Enable segment listing */
 {
     SegList = 1;
+}
+
+
+
+static void OptWarnAlignWaste (const char* Opt attribute ((unused)),
+                               const char* Arg attribute ((unused)))
+/* Warn about bytes "wasted" for alignment */
+{
+    WarnAlignWaste = 1;
 }
 
 
@@ -1091,6 +1098,7 @@ int main (int argc, char* argv [])
         { "--target",              1,      OptTarget               },
         { "--verbose",             0,      OptVerbose              },
         { "--version",             0,      OptVersion              },
+        { "--warn-align-waste",    0,      OptWarnAlignWaste       },
         { "--warnings-as-errors",  0,      OptWarningsAsErrors     },
     };
 
@@ -1253,6 +1261,9 @@ int main (int argc, char* argv [])
     if (MemoryModel == MMODEL_UNKNOWN) {
         SetMemoryModel (MMODEL_NEAR);
     }
+
+    /* Define the symbols for evaluating .cpu */
+    DefineCpuSymbols ();
 
     /* Set the default segment sizes according to the memory model */
     SetSegmentSizes ();
