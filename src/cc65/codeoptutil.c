@@ -509,6 +509,68 @@ void SetIfOperandLoadUnremovable (LoadInfo* LI, unsigned Used)
 
 
 
+static int IsRegInsnSameAsOtherAX (int InsnIndex, const LoadInfo* OtherLI)
+/* Helper: Return true if the other side (Rhs or Lhs) refers to the same insn */
+{
+    if (InsnIndex < 0) {
+        /* No, do not have an insn */
+        return 0;
+    }
+
+    /* Check if this insn matches any load/change on the other side */
+    return InsnIndex == OtherLI->A.LoadIndex ||
+           InsnIndex == OtherLI->A.ChgIndex ||
+           InsnIndex == OtherLI->X.LoadIndex ||
+           InsnIndex == OtherLI->X.ChgIndex;
+}
+
+
+
+static int IsRegInsnSameAsOtherY (int InsnIndex, const LoadInfo* OtherLI)
+/* Helper: Return true if the other side (Rhs or Lhs) refers to the same insn */
+{
+    if (InsnIndex < 0) {
+        /* No, do not have an insn */
+        return 0;
+    }
+
+    /* Check if this insn matches any load/change on the other side */
+    return InsnIndex == OtherLI->Y.LoadIndex ||
+           InsnIndex == OtherLI->Y.ChgIndex;
+}
+
+
+
+void SetUnremovableIfUsedByOther (LoadInfo* LI, const LoadInfo* OtherLI)
+/* Check and flag operand loads unremovable if the other side (Rhs or Lhs)
+** uses the same load insn (checked by index).
+*/
+{
+    /* Disallow removing the loads if they are shared between Lhs and Rhs.
+    ** Note: For safety, we check the ChgIndex as well, which accounts for
+    ** conditions where a label is encountered in the block.
+    */
+    if (IsRegInsnSameAsOtherAX (LI->A.LoadIndex, OtherLI) ||
+        IsRegInsnSameAsOtherAX (LI->A.ChgIndex, OtherLI)) {
+        /* Parts of A load are used by other and cannot be removed */
+        LI->A.Flags |= LI_DONT_REMOVE;
+    }
+
+    if (IsRegInsnSameAsOtherAX (LI->X.LoadIndex, OtherLI) ||
+        IsRegInsnSameAsOtherAX (LI->X.ChgIndex, OtherLI)) {
+        /* Parts of X load are used by other and cannot be removed */
+        LI->X.Flags |= LI_DONT_REMOVE;
+    }
+
+    if (IsRegInsnSameAsOtherY (LI->Y.LoadIndex, OtherLI) ||
+        IsRegInsnSameAsOtherY (LI->Y.ChgIndex, OtherLI)) {
+        /* Parts of Y load are used by other and cannot be removed */
+        LI->Y.Flags |= LI_DONT_REMOVE;
+    }
+}
+
+
+
 unsigned int TrackLoads (LoadInfo* LI, CodeSeg* S, int I)
 /* Track loads for a code entry.
 ** Return used registers.
@@ -756,6 +818,10 @@ void ResetStackOpData (StackOpData* Data)
 
     Data->PushIndex     = -1;
     Data->OpIndex       = -1;
+
+    /* Clear to prevent silent optimizer bugs */
+    Data->ZPLo          = 0;
+    Data->ZPHi          = 0;
 }
 
 
@@ -946,10 +1012,9 @@ void AdjustStackOffset (StackOpData* D, unsigned Offs)
 
 
 
-int IsRegVar (StackOpData* D)
+int IsRegVar (const StackOpData* D)
 /* If the value pushed is that of a zeropage variable that is unchanged until Op,
-** replace ZPLo and ZPHi in the given StackOpData struct by the variable and return true.
-** Otherwise leave D untouched and return false.
+** return true.
 */
 {
     CodeEntry*  LoadA = D->Lhs.A.LoadEntry;
@@ -979,9 +1044,7 @@ int IsRegVar (StackOpData* D)
         return 0;
     }
 
-    /* Use the zero page location directly */
-    D->ZPLo = LoadA->Arg;
-    D->ZPHi = LoadX->Arg;
+    /* ZP location can be used directly */
     return 1;
 }
 
@@ -990,6 +1053,8 @@ int IsRegVar (StackOpData* D)
 void AddStoreLhsA (StackOpData* D)
 /* Add a store to zero page after the push insn */
 {
+    CHECK (D->ZPLo != 0);
+
     CodeEntry* X = NewCodeEntry (OP65_STA, AM65_ZP, D->ZPLo, 0, D->PushEntry->LI);
     InsertEntry (D, X, D->PushIndex+1);
 }
@@ -999,6 +1064,8 @@ void AddStoreLhsA (StackOpData* D)
 void AddStoreLhsX (StackOpData* D)
 /* Add a store to zero page after the push insn */
 {
+    CHECK (D->ZPHi != 0);
+
     CodeEntry* X = NewCodeEntry (OP65_STX, AM65_ZP, D->ZPHi, 0, D->PushEntry->LI);
     InsertEntry (D, X, D->PushIndex+1);
 }
@@ -1071,6 +1138,8 @@ void AddOpLow (StackOpData* D, opc_t OPC, LoadInfo* LI)
 
     } else {
 
+        CHECK (D->ZPLo != 0);
+
         /* Op with temp storage */
         X = NewCodeEntry (OPC, AM65_ZP, D->ZPLo, 0, D->OpEntry->LI);
         InsertEntry (D, X, D->IP++);
@@ -1134,6 +1203,9 @@ void AddOpHigh (StackOpData* D, opc_t OPC, LoadInfo* LI, int KeepResult)
         }
 
     } else {
+
+        CHECK (D->ZPHi != 0);
+
         /* opc zphi */
         X = NewCodeEntry (OPC, AM65_ZP, D->ZPHi, 0, D->OpEntry->LI);
         InsertEntry (D, X, D->IP++);

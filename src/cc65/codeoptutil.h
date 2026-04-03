@@ -180,6 +180,11 @@ void SetIfOperandSrcAffected (LoadInfo* LLI, CodeEntry* E);
 void SetIfOperandLoadUnremovable (LoadInfo* LI, unsigned Used);
 /* Check and flag operand load that may be unremovable */
 
+void SetUnremovableIfUsedByOther (LoadInfo* LI, const LoadInfo* OtherLI);
+/* Check and flag operand loads unremovable if the other side (Rhs or Lhs)
+** uses the same load insn (checked by index).
+*/
+
 unsigned int TrackLoads (LoadInfo* LI, CodeSeg* S, int I);
 /* Track loads for a code entry.
 ** Return used registers.
@@ -223,10 +228,9 @@ void AdjustStackOffset (StackOpData* D, unsigned Offs);
 ** OpIndex is adjusted according to the insertions.
 */
 
-int IsRegVar (StackOpData* D);
+int IsRegVar (const StackOpData* D);
 /* If the value pushed is that of a zeropage variable that is unchanged until Op,
-** replace ZPLo and ZPHi in the given StackOpData struct by the variable and return true.
-** Otherwise leave D untouched and return false.
+** return true.
 */
 
 void AddStoreLhsA (StackOpData* D);
